@@ -1,6 +1,7 @@
 """Application configuration loaded from environment variables (see .env.example)."""
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -56,6 +57,15 @@ class Settings(BaseSettings):
     google_client_id: str = ""
     google_client_secret: str = ""
     google_redirect_uri: str = "http://localhost:8000/api/v1/integrations/google/callback"
+
+    @field_validator("database_url")
+    @classmethod
+    def _use_psycopg_driver(cls, v: str) -> str:
+        # Hosting providers (Render, Heroku...) hand out postgres:// or postgresql:// URLs.
+        for prefix in ("postgres://", "postgresql://"):
+            if v.startswith(prefix):
+                return "postgresql+psycopg://" + v[len(prefix):]
+        return v
 
     @property
     def cors_origin_list(self) -> list[str]:

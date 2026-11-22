@@ -1,0 +1,29 @@
+# Single-container image for Render (free plan): Next.js web + FastAPI + Celery worker/beat.
+# Next proxies /api/* to FastAPI on 127.0.0.1:8000, so only the web port is public.
+FROM node:22-slim AS web-build
+WORKDIR /web
+ENV NEXT_TELEMETRY_DISABLED=1 BACKEND_URL=http://127.0.0.1:8000
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ .
+RUN npm run build
+
+FROM node:22-slim AS node
+
+FROM python:3.13-slim
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 \
+    NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+WORKDIR /app/backend
+COPY backend/requirements.txt .
+RUN pip install -r requirements.txt
+COPY backend/ .
+COPY --from=web-build /web/.next/standalone /app/web
+COPY --from=web-build /web/.next/static /app/web/.next/static
+COPY --from=web-build /web/public /app/web/public
+COPY scripts/render-start.sh /app/start.sh
+RUN useradd -m -u 10001 lifeos && mkdir -p storage/uploads \
+    && chown -R lifeos /app/backend/storage && chmod +x /app/start.sh
+USER lifeos
+EXPOSE 10000
+CMD ["/app/start.sh"]
