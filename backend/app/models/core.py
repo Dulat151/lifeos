@@ -49,6 +49,10 @@ class UserSettings(UUIDPk, Timestamps, Owned, Base):
     gamification_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     reading_goal_yearly: Mapped[int] = mapped_column(default=12)
     categories: Mapped[dict] = mapped_column(JSON, default=dict)
+    # cosmetics bought in the rewards shop: {"accent": "#...", "badge": code, "frame": code}
+    cosmetics: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
+    # UI preferences: calendar_view, xp_animations, show_quests_on_dashboard ...
+    preferences: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
     user: Mapped[User] = relationship(back_populates="settings")
 
 

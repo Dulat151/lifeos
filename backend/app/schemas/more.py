@@ -427,11 +427,14 @@ class NoteCreate(BaseModel):
     category: Annotated[str, Field(max_length=60)] | None = None
     tags: list[Annotated[str, Field(max_length=60)]] = []
     is_favorite: bool = False
+    is_pinned: bool = False
     archived: bool = False
     goal_id: uuid.UUID | None = None
     course_id: uuid.UUID | None = None
     book_id: uuid.UUID | None = None
     task_id: uuid.UUID | None = None
+    project_id: uuid.UUID | None = None
+    habit_id: uuid.UUID | None = None
 
 
 NoteUpdate = make_update(NoteCreate, "NoteUpdate")
@@ -613,3 +616,40 @@ class AIActionRead(Read):
 
 class AIConversationRead(Read):
     title: str
+
+
+# ---------------------------------------------------------------- Projects
+
+ProjectStatus = Literal["idea", "planned", "in_progress", "done"]
+
+
+class ProjectCreate(BaseModel):
+    title: Annotated[str, Field(min_length=1, max_length=200)]
+    description: Annotated[str, Field(max_length=20000)] = ""
+    status: ProjectStatus = "planned"
+    priority: Annotated[int, Field(ge=1, le=3)] = 2
+    color: Annotated[str, Field(pattern=r"^#[0-9a-fA-F]{6}$")] = "#8b7cf6"
+    deadline: date | None = None
+    position: float = 0
+    goal_id: uuid.UUID | None = None
+
+
+class ProjectUpdate(make_update(ProjectCreate, "_PU")):
+    archived: bool | None = None
+
+
+class ProjectRead(Read):
+    title: str
+    description: str
+    status: str
+    priority: int
+    color: str
+    deadline: date | None
+    position: float
+    goal_id: uuid.UUID | None
+    archived: bool
+    completed_at: datetime | None
+    tasks_total: int = 0
+    tasks_done: int = 0
+    progress: float = 0
+    notes_count: int = 0

@@ -6,7 +6,7 @@ from sqlalchemy import func, or_, select
 
 from app.core.deps import DB, CurrentUser, ensure_refs_owned, get_owned
 from app.core.time import user_tz, utcnow
-from app.models import Goal, Milestone, Task, TaskChecklistItem, TaskComment, TaskDependency, TaskHistory, TaskTag
+from app.models import Goal, Milestone, Project, Task, TaskChecklistItem, TaskComment, TaskDependency, TaskHistory, TaskTag
 from app.schemas import (BulkTaskIn, ChecklistItemIn, ChecklistItemRead, CommentIn, DependencyIn, MoveTaskIn,
                          TaskCreate, TaskRead, TaskUpdate)
 from app.services import gamification as gm
@@ -47,7 +47,7 @@ def _reads(db, user, tasks: list[Task]) -> list[TaskRead]:
 
 def _refs(db, user, data):
     ensure_refs_owned(db, user, {Task: data.get("parent_id"), Goal: data.get("goal_id"),
-                                 Milestone: data.get("milestone_id")})
+                                 Milestone: data.get("milestone_id"), Project: data.get("project_id")})
     if data.get("milestone_id") and not data.get("goal_id"):
         data["goal_id"] = db.get(Milestone, data["milestone_id"]).goal_id
 
@@ -56,7 +56,7 @@ def _on_status_change(db, user, t: Task, old: str):
     if t.status == "done" and old != "done":
         t.completed_at = utcnow()
         # key includes completion count so reopen+complete cannot farm XP but recurring copies are separate tasks
-        gm.award(db, user, "task_done", "task", t.id)
+        gm.award(db, user, "task_done", "task", t.id, amount=gm.task_xp(t))
         log_event(db, user.id, "task_done", "task", t.id, {"title": t.title})
         if t.recurrence_rule and not t.parent_id:
             _spawn_next(db, user, t)
@@ -86,7 +86,8 @@ def list_tasks(
     db: DB, user: CurrentUser,
     view: str = Query("all", pattern="^(all|today|upcoming|overdue|completed|backlog|templates|archived)$"),
     status: str | None = None, priority: int | None = None, tag: str | None = None, category: str | None = None,
-    goal_id: uuid.UUID | None = None, parent_id: uuid.UUID | None = None, q: str | None = Query(None, max_length=200),
+    goal_id: uuid.UUID | None = None, project_id: uuid.UUID | None = None,
+    parent_id: uuid.UUID | None = None, q: str | None = Query(None, max_length=200),
     sort: str = Query("smart", pattern="^(smart|due|priority|created|title|position)$"),
     limit: int = Query(200, ge=1, le=1000), offset: int = Query(0, ge=0),
 ):
@@ -120,6 +121,8 @@ def list_tasks(
         stmt = stmt.where(Task.category == category)
     if goal_id:
         stmt = stmt.where(Task.goal_id == goal_id)
+    if project_id:
+        stmt = stmt.where(Task.project_id == project_id)
     if tag:
         stmt = stmt.where(Task.id.in_(select(TaskTag.task_id).where(TaskTag.name == tag)))
     if q:

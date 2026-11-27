@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
-from app.api.v1 import (ai, analytics, auth, calendar, files, goals, habits, integrations, learning, life, personal,
+from app.api.v1 import (ai, projects, rewards, analytics, auth, calendar, files, goals, habits, integrations, learning, life, personal,
                         reminders, tasks, users)
 from app.core.config import settings
 from app.core.db import SessionLocal, engine
@@ -75,7 +75,8 @@ api = APIRouter(prefix="/api/v1")
 for r in (auth.router, users.router, goals.router, tasks.router, habits.router, calendar.router, reminders.router,
           learning.learning, learning.flashcards, learning.books, life.health, life.finance, life.journal,
           life.notes, life.folders, life.focus, analytics.analytics, analytics.dashboard, analytics.gamification,
-          personal.personal, personal.challenges, personal.social, ai.router, files.router, integrations.router):
+          personal.personal, personal.challenges, personal.social, ai.router, files.router, integrations.router, projects.router,
+          rewards.router):
     api.include_router(r)
 app.include_router(api)
 

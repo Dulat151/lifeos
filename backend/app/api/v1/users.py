@@ -50,6 +50,15 @@ def get_settings(user: CurrentUser):
 @router.patch("/settings", response_model=SettingsRead)
 def update_settings(payload: SettingsUpdate, user: CurrentUser, db: DB):
     data = payload.model_dump(exclude_unset=True)
+    if "preferences" in data and data["preferences"] is not None:
+        allowed = {"calendar_view": ("month", "week", "day", "agenda"), "xp_animations": (True, False),
+                   "show_quests": (True, False), "default_note_template": None, "start_page": None}
+        prefs = dict(user.settings.preferences or {})
+        for k, v in data["preferences"].items():
+            if k not in allowed or (allowed[k] and v not in allowed[k]) or (isinstance(v, str) and len(v) > 60):
+                raise HTTPException(422, f"Недопустимая настройка: {k}")
+            prefs[k] = v
+        data["preferences"] = prefs
     nullable = {"quiet_hours_start", "quiet_hours_end"}
     for k, v in data.items():
         if v is None and k not in nullable:

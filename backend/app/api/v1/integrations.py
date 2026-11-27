@@ -15,7 +15,13 @@ from app.core.deps import DB, CurrentUser
 from app.core.time import utcnow
 from app.models import ConnectedAccount
 from app.services.caldav import ICLOUD_URL, CalDAVClient, CalDAVError, check_url
-from app.services.calendar_sync import SyncError, encrypt, sync_account
+from app.services.calendar_sync import (
+    SyncError,
+    encrypt,
+    list_google_calendars,
+    sync_account,
+    unlink_google_calendars,
+)
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
 SCOPE = "https://www.googleapis.com/auth/calendar.events openid email"
@@ -55,11 +61,53 @@ def _run_sync(db, acc: ConnectedAccount, client: CalDAVClient | None = None) -> 
     return stats
 
 
+# Registry of external services. "available" = really implemented; "planned" = shown honestly as not yet
+# available (no fake connect button). Adding a service = one entry here + its endpoints; the UI renders the list.
+CATALOG = [
+    {"id": "google_calendar", "name": "Google Calendar", "category": "calendar", "status": "available",
+     "description": "Двусторонняя синхронизация событий, выбор календарей, создание событий в Google из LIFE OS."},
+    {"id": "apple_calendar", "name": "Apple iCloud Календарь", "category": "calendar", "status": "available",
+     "description": "Двусторонняя синхронизация через CalDAV с паролем приложения Apple. Подходит и для "
+                    "Fastmail, Nextcloud, Яндекса."},
+    {"id": "google_keep", "name": "Google Keep", "category": "notes", "status": "import",
+     "description": "Импорт заметок из архива Google Takeout. API Keep для личных аккаунтов Google не существует."},
+    {"id": "apple_notes", "name": "Apple Notes", "category": "notes", "status": "import",
+     "description": "Импорт заметок (скрипт экспорта для Mac или Markdown). У Apple Notes нет веб-API."},
+    {"id": "google_tasks", "name": "Google Tasks", "category": "tasks", "status": "planned",
+     "description": "Синхронизация задач с Google Tasks. Пока не реализовано."},
+    {"id": "google_drive", "name": "Google Drive", "category": "files", "status": "planned",
+     "description": "Прикрепление файлов из Google Drive к задачам и заметкам. Пока не реализовано."},
+    {"id": "notion", "name": "Notion", "category": "notes", "status": "planned",
+     "description": "Импорт страниц и баз Notion. Пока не реализовано."},
+    {"id": "todoist", "name": "Todoist", "category": "tasks", "status": "planned",
+     "description": "Импорт и синхронизация задач Todoist. Пока не реализовано."},
+    {"id": "telegram", "name": "Telegram", "category": "notifications", "status": "planned",
+     "description": "Напоминания и быстрые заметки через Telegram-бота. Пока не реализовано."},
+]
+
+
+@router.get("/catalog")
+def catalog(db: DB, user: CurrentUser):
+    state = list_integrations(db, user)
+    out = []
+    for it in CATALOG:
+        connected, configured = False, True
+        if it["id"] == "google_calendar":
+            connected, configured = state["google"]["connected"], state["google"]["configured"]
+        elif it["id"] == "apple_calendar":
+            connected = state["caldav"]["connected"]
+        out.append({**it, "connected": connected, "configured": configured})
+    return out
+
+
 @router.get("")
 def list_integrations(db: DB, user: CurrentUser):
     g, c = _account(db, user, "google"), _account(db, user, "caldav")
     cmeta = (c.meta or {}) if c else {}
-    return {"google": {"configured": _google_configured(), **_status(g)},
+    gmeta = (g.meta or {}) if g else {}
+    return {"google": {"configured": _google_configured(), **_status(g),
+                       "calendars": gmeta.get("calendars") or (["primary"] if g else []),
+                       "write_calendar": gmeta.get("write_calendar") or ("primary" if g else None)},
             "caldav": {**_status(c), "server_url": cmeta.get("server_url"), "calendar_name": cmeta.get("calendar_name")},
             "sync_minutes": settings.calendar_sync_minutes}
 
@@ -130,6 +178,55 @@ def google_sync(db: DB, user: CurrentUser):
     if not acc:
         raise HTTPException(404, "Google не подключён")
     return _run_sync(db, acc)
+
+
+@router.get("/google/calendars")
+def google_calendars(db: DB, user: CurrentUser):
+    """Calendars of the connected Google account and which of them LIFE OS syncs."""
+    _require_google()
+    acc = _account(db, user, "google")
+    if not acc:
+        raise HTTPException(404, "Google не подключён")
+    try:
+        cals = list_google_calendars(acc)
+    except SyncError as e:
+        db.commit()
+        raise HTTPException(401 if e.reconnect else 502, str(e)) from None
+    db.commit()  # token refresh
+    m = acc.meta or {}
+    return {"calendars": cals, "selected": m.get("calendars") or ["primary"],
+            "write_calendar": m.get("write_calendar") or "primary"}
+
+
+class GoogleCalendarsIn(BaseModel):
+    selected: list[str] = Field(min_length=1, max_length=50)
+    write_calendar: str = "primary"
+
+
+@router.put("/google/calendars")
+def set_google_calendars(payload: GoogleCalendarsIn, db: DB, user: CurrentUser):
+    _require_google()
+    acc = _account(db, user, "google")
+    if not acc:
+        raise HTTPException(404, "Google не подключён")
+    try:
+        cals = {c["id"]: c for c in list_google_calendars(acc)}
+    except SyncError as e:
+        raise HTTPException(401 if e.reconnect else 502, str(e)) from None
+    selected = list(dict.fromkeys(c for c in payload.selected if c in cals))
+    if not selected:
+        raise HTTPException(422, "Выберите хотя бы один календарь")
+    if payload.write_calendar not in selected or not cals[payload.write_calendar]["writable"]:
+        raise HTTPException(422, "Календарь для новых событий должен быть выбран и доступен для записи")
+    m = acc.meta or {}
+    removed = set(m.get("calendars") or ["primary"]) - set(selected)
+    unlink_google_calendars(db, user, removed)
+    acc.meta = {**m, "calendars": selected, "write_calendar": payload.write_calendar,
+                "calendars_info": {c: {"name": cals[c]["name"], "color": cals[c]["color"],
+                                       "writable": cals[c]["writable"]} for c in selected}}
+    db.commit()
+    stats = _run_sync(db, acc)
+    return {"selected": selected, "write_calendar": payload.write_calendar, "removed": sorted(removed), **stats}
 
 
 @router.delete("/google", status_code=204)

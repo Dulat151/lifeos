@@ -168,23 +168,8 @@ def compute(db: Session, user, start: date, end: date, category: str | None = No
 
 def activity_streak(db: Session, user, today: date) -> int:
     """Consecutive days (ending today, or yesterday if today has nothing yet) with at least one completed task,
-    habit check or completed focus session."""
-    tz = user_tz(user)
-    since = today - timedelta(days=400)
-    s_dt, _ = _bounds(user, since, today)
-    active = set()
-    for (ts,) in db.execute(select(Task.completed_at).where(Task.user_id == user.id, Task.completed_at >= s_dt)):
-        active.add(ts.astimezone(tz).date())
-    for (d,) in db.execute(select(HabitLog.log_date).where(HabitLog.user_id == user.id, HabitLog.status == "done",
-                                                           HabitLog.log_date >= since)):
-        active.add(d)
-    for (ts,) in db.execute(select(FocusSession.started_at).where(FocusSession.user_id == user.id,
-                                                                  FocusSession.status == "completed",
-                                                                  FocusSession.started_at >= s_dt)):
-        active.add(ts.astimezone(tz).date())
-    d = today if today in active else today - timedelta(days=1)
-    n = 0
-    while d in active:
-        n += 1
-        d -= timedelta(days=1)
-    return n
+    habit check or completed focus session. Days covered by a streak freeze count. See services/streaks.py."""
+    from app.services import streaks
+
+    s = streaks.day_sets(db, user)
+    return streaks.current(s["activity"] | s["frozen"], today)

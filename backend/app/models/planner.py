@@ -56,6 +56,22 @@ class GoalHistory(UUIDPk, Owned, Base):
 TASK_STATUSES = ("backlog", "todo", "in_progress", "done", "cancelled")
 
 
+class Project(UUIDPk, Timestamps, SoftDelete, Owned, Base):
+    """Personal project: Kanban status idea -> planned -> in_progress -> done; tasks and notes link to it."""
+
+    __tablename__ = "projects"
+    title: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(20), default="planned", index=True)  # idea|planned|in_progress|done
+    priority: Mapped[int] = mapped_column(Integer, default=2)  # 1 high, 2 medium, 3 low
+    color: Mapped[str] = mapped_column(String(20), default="#8b7cf6")
+    deadline: Mapped[date | None] = mapped_column(Date)
+    position: Mapped[float] = mapped_column(Float, default=0)
+    goal_id: Mapped[uuid.UUID | None] = fk("goals.id")
+    archived: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class Task(UUIDPk, Timestamps, SoftDelete, Owned, Base):
     __tablename__ = "tasks"
     __table_args__ = (CheckConstraint(f"status IN {TASK_STATUSES}", name="ck_task_status"),)
@@ -72,6 +88,7 @@ class Task(UUIDPk, Timestamps, SoftDelete, Owned, Base):
     parent_id: Mapped[uuid.UUID | None] = fk("tasks.id", ondelete="CASCADE")  # subtasks
     goal_id: Mapped[uuid.UUID | None] = fk("goals.id")  # goal_tasks link
     milestone_id: Mapped[uuid.UUID | None] = fk("milestones.id")
+    project_id: Mapped[uuid.UUID | None] = fk("projects.id")
     is_template: Mapped[bool] = mapped_column(Boolean, default=False)
     archived: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -176,6 +193,9 @@ class CalendarEvent(UUIDPk, Timestamps, SoftDelete, Owned, Base):
     task_id: Mapped[uuid.UUID | None] = fk("tasks.id")
     goal_id: Mapped[uuid.UUID | None] = fk("goals.id")
     habit_id: Mapped[uuid.UUID | None] = fk("habits.id")
+    project_id: Mapped[uuid.UUID | None] = fk("projects.id")
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # single event marked done
+    done_occurrences: Mapped[list | None] = mapped_column(JSON)  # recurring: ISO starts (UTC) marked done
     external_source: Mapped[str | None] = mapped_column(String(20))  # ics | google | caldav
     external_uid: Mapped[str | None] = mapped_column(String(255), index=True)
     # sync bookkeeping: google {"id"}, caldav {"href", "uid", "etag"}

@@ -12,7 +12,7 @@ from sqlalchemy import delete, func, or_, select
 from app.api.crud import crud_router
 from app.core.deps import DB, CurrentUser, ensure_refs_owned, get_owned
 from app.core.time import local_today, user_tz, utcnow
-from app.models import (Book, Budget, Course, Distraction, Exercise, FocusSession, Folder, Goal, HealthLog,
+from app.models import (Book, Budget, Habit, Project, Course, Distraction, Exercise, FocusSession, Folder, Goal, HealthLog,
                         JournalEntry, JournalTemplate, LearningSession, Note, NoteLink, SavingsGoal, Subject,
                         Subscription, Task, Transaction, Workout, WorkoutPlan, WorkoutSet)
 from app.schemas.more import (BudgetCreate, BudgetRead, BudgetUpdate, DistractionIn, DistractionRead, ExerciseCreate,
@@ -370,7 +370,8 @@ def sync_links(db, user, note: Note):
             db.add(NoteLink(source_id=note.id, target_id=tid))
 
 
-NOTE_REFS = {"folder_id": Folder, "goal_id": Goal, "course_id": Course, "book_id": Book, "task_id": Task}
+NOTE_REFS = {"folder_id": Folder, "goal_id": Goal, "course_id": Course, "book_id": Book, "task_id": Task,
+             "project_id": Project, "habit_id": Habit}
 
 
 @notes.get("/graph")
@@ -433,8 +434,9 @@ async def import_notes(db: DB, user: CurrentUser, files: list[UploadFile] = File
 
 crud_router(model=Note, create_schema=NoteCreate, update_schema=NoteUpdate, read_schema=NoteRead, tags=["notes"],
             router=notes, path="", search_fields=("title", "content"),
-            filter_fields=("folder_id", "is_favorite", "category", "goal_id", "course_id", "book_id", "task_id"),
-            ref_models=NOTE_REFS, order_by=(Note.is_favorite.desc(), Note.updated_at.desc()),
+            filter_fields=("folder_id", "is_favorite", "is_pinned", "category", "goal_id", "course_id", "book_id", "task_id",
+                           "project_id", "habit_id"),
+            ref_models=NOTE_REFS, order_by=(Note.is_pinned.desc(), Note.updated_at.desc()),
             after_create=lambda db, u, n: sync_links(db, u, n),
             after_update=lambda db, u, n, b: sync_links(db, u, n) if "content" in b else None)
 folders = crud_router(model=Folder, create_schema=FolderCreate, update_schema=FolderUpdate, read_schema=FolderRead,

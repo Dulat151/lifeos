@@ -29,7 +29,6 @@ from app.services.recurrence import validate_rrule
 
 log = logging.getLogger("lifeos.calendar_sync")
 PAST, FUTURE = timedelta(days=30), timedelta(days=365)
-GOOGLE_EVENTS = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
 FIELDS = ("title", "description", "location", "starts_at", "ends_at", "all_day", "timezone", "recurrence_rule")
 
 
@@ -168,62 +167,101 @@ def _google_call(method: str, url: str, token: str, **kw) -> httpx.Response:
     return r
 
 
+def events_url(cal: str) -> str:
+    return f"https://www.googleapis.com/calendar/v3/calendars/{quote(cal, safe='@.')}/events"
+
+
+def google_uid(cal: str, gid: str) -> str:
+    """Primary calendar keeps the historical form google:<id>; other calendars are namespaced."""
+    return f"google:{gid}" if cal == "primary" else f"google:{cal}|{gid}"[:255]
+
+
+def google_selection(acc: ConnectedAccount) -> tuple[list[str], str, dict]:
+    m = acc.meta or {}
+    return (m.get("calendars") or ["primary"]), m.get("write_calendar") or "primary", m.get("calendars_info") or {}
+
+
+def list_google_calendars(acc: ConnectedAccount) -> list[dict]:
+    token = google_access_token(acc)
+    r = _google_call("GET", "https://www.googleapis.com/calendar/v3/users/me/calendarList", token,
+                     params={"maxResults": 250})
+    if r.status_code != 200:
+        raise SyncError(f"Google не вернул список календарей: {r.status_code}")
+    return [{"id": "primary" if c.get("primary") else c["id"], "name": c.get("summaryOverride") or c.get("summary") or c["id"],
+             "color": c.get("backgroundColor"), "primary": bool(c.get("primary")),
+             "writable": c.get("accessRole") in ("owner", "writer")} for c in r.json().get("items", [])]
+
+
 def sync_google(db, user: User, acc: ConnectedAccount) -> dict:
     if not (settings.google_client_id and settings.google_client_secret):
         raise SyncError("Интеграция Google не настроена на сервере")
     token = google_access_token(acc)
     since, now, stats, touched = acc.last_sync_at, utcnow(), _stats(), set()
     default_tz = user.profile.timezone if user.profile else "UTC"
+    selected, write_cal, info = google_selection(acc)
 
-    items, page = [], None
-    while True:
-        params = {"timeMin": (now - PAST).isoformat(), "timeMax": (now + FUTURE).isoformat(),
-                  "singleEvents": "false", "showDeleted": "true", "maxResults": 2500}
-        if page:
-            params["pageToken"] = page
-        r = _google_call("GET", GOOGLE_EVENTS, token, params=params)
-        if r.status_code != 200:
-            raise SyncError(f"Ошибка Google Calendar API: {r.status_code}")
-        j = r.json()
-        items += j.get("items", [])
-        page = j.get("nextPageToken")
-        if not page:
-            break
-
-    for it in items:
-        if it.get("recurringEventId"):
-            continue
-        ev = _find(db, user, f"google:{it['id']}")
-        if it.get("status") == "cancelled":
-            if ev and ev.deleted_at is None:
-                ev.deleted_at, ev.external_uid = now, None  # unlinked: nothing to delete remotely later
-                touched.add(ev.id)
-                stats["pulled_deleted"] += 1
-            continue
-        vals = from_google(it, default_tz)
-        if vals is None:
-            continue
-        if ev:
-            if ev.deleted_at is not None or _local_wins(ev, since, _parse_ts(it.get("updated"))):
+    for cal in selected:
+        items, page = [], None
+        while True:
+            params = {"timeMin": (now - PAST).isoformat(), "timeMax": (now + FUTURE).isoformat(),
+                      "singleEvents": "false", "showDeleted": "true", "maxResults": 2500}
+            if page:
+                params["pageToken"] = page
+            r = _google_call("GET", events_url(cal), token, params=params)
+            if r.status_code == 404 and cal != "primary":
+                break  # calendar removed / unshared in Google
+            if r.status_code != 200:
+                raise SyncError(f"Ошибка Google Calendar API: {r.status_code}")
+            j = r.json()
+            items += j.get("items", [])
+            page = j.get("nextPageToken")
+            if not page:
+                break
+        ro = not (info.get(cal) or {}).get("writable", True)
+        for it in items:
+            if it.get("recurringEventId"):
                 continue
-            if _apply(ev, vals):
-                stats["pulled_updated"] += 1
-        else:
-            ev = CalendarEvent(user_id=user.id, external_source="google", external_uid=f"google:{it['id']}", **vals)
-            db.add(ev)
-            db.flush()
-            stats["pulled_created"] += 1
-        ev.external_meta = {"id": it["id"]}
-        touched.add(ev.id)
+            uid = google_uid(cal, it["id"])
+            ev = _find(db, user, uid)
+            if it.get("status") == "cancelled":
+                if ev and ev.deleted_at is None:
+                    ev.deleted_at, ev.external_uid = now, None  # unlinked: nothing to delete remotely later
+                    touched.add(ev.id)
+                    stats["pulled_deleted"] += 1
+                continue
+            vals = from_google(it, default_tz)
+            if vals is None:
+                continue
+            if ev:
+                if ev.deleted_at is not None or (not ro and _local_wins(ev, since, _parse_ts(it.get("updated")))):
+                    continue
+                if _apply(ev, vals):
+                    stats["pulled_updated"] += 1
+            else:
+                color = (info.get(cal) or {}).get("color")
+                ev = CalendarEvent(user_id=user.id, external_source="google", external_uid=uid, **vals,
+                                   **({"color": color} if color and cal != "primary" else {}))
+                db.add(ev)
+                db.flush()
+                stats["pulled_created"] += 1
+            ev.external_meta = {"id": it["id"], "cal": cal, **({"ro": True} if ro else {})}
+            touched.add(ev.id)
     db.flush()
 
     for ev in _push_candidates(db, user, ["google"], native=True, now=now):
         if ev.id in touched:
             continue
-        gid = ev.external_uid[len("google:"):] if ev.external_source == "google" and ev.external_uid else None
+        meta = ev.external_meta or {}
+        cal = meta.get("cal", "primary") if ev.external_source == "google" else write_cal
+        if ev.external_source == "google" and (cal not in selected or meta.get("ro")):
+            continue  # read-only (e.g. holidays) or no longer synced
+        gid = None
+        if ev.external_source == "google" and ev.external_uid:
+            gid = meta.get("id") or ev.external_uid[len("google:"):]
+        url = events_url(cal)
         if ev.deleted_at is not None:
             if gid:
-                r = _google_call("DELETE", f"{GOOGLE_EVENTS}/{quote(gid)}", token)
+                r = _google_call("DELETE", f"{url}/{quote(gid)}", token)
                 if r.status_code not in (200, 204, 404, 410):
                     raise SyncError(f"Google не удалил событие: {r.status_code}")
                 ev.external_uid = None
@@ -232,23 +270,36 @@ def sync_google(db, user: User, acc: ConnectedAccount) -> dict:
         if gid:
             if since is not None and ev.updated_at <= since:
                 continue  # unchanged locally
-            r = _google_call("PATCH", f"{GOOGLE_EVENTS}/{quote(gid)}", token, json=to_google(ev))
+            r = _google_call("PATCH", f"{url}/{quote(gid)}", token, json=to_google(ev))
             if r.status_code == 200:
                 stats["pushed_updated"] += 1
                 continue
             if r.status_code not in (404, 410):
                 raise SyncError(f"Google не обновил событие «{ev.title}»: {r.status_code}")
             # removed in Google while edited here -> recreate below
-        r = _google_call("POST", GOOGLE_EVENTS, token, json=to_google(ev))
+        r = _google_call("POST", url, token, json=to_google(ev))
         if r.status_code != 200:
             raise SyncError(f"Google не создал событие «{ev.title}»: {r.status_code}")
         new_id = r.json()["id"]
-        ev.external_source, ev.external_uid, ev.external_meta = "google", f"google:{new_id}", {"id": new_id}
+        ev.external_source, ev.external_uid = "google", google_uid(cal, new_id)
+        ev.external_meta = {"id": new_id, "cal": cal}
         stats["pushed_created"] += 1
 
     acc.last_sync_at = utcnow()
     acc.meta = {**(acc.meta or {}), "last_error": None}
     return stats
+
+
+def unlink_google_calendars(db, user, removed: set[str]) -> int:
+    """Calendars removed from the selection: their imported copies are removed from LIFE OS (not from Google)."""
+    n = 0
+    for ev in db.scalars(select(CalendarEvent).where(CalendarEvent.user_id == user.id,
+                                                     CalendarEvent.external_source == "google",
+                                                     CalendarEvent.deleted_at.is_(None))):
+        if (ev.external_meta or {}).get("cal", "primary") in removed:
+            ev.deleted_at, ev.external_uid = utcnow(), None
+            n += 1
+    return n
 
 
 # ================================================================ CalDAV (iCloud)

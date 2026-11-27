@@ -3,11 +3,12 @@ from datetime import UTC, date, datetime, timedelta
 
 from fastapi import APIRouter, File, HTTPException, Query, Response, UploadFile
 from icalendar import Calendar, Event
+from pydantic import BaseModel
 from sqlalchemy import and_, or_, select
 
 from app.core.deps import DB, CurrentUser, ensure_refs_owned, get_owned
 from app.core.time import utcnow
-from app.models import CalendarEvent, Goal, Habit, Reminder, Task
+from app.models import CalendarEvent, Goal, Habit, Project, Reminder, Task
 from app.schemas import EventCreate, EventOccurrence, EventRead, EventUpdate
 from app.services.recurrence import occurrences, validate_rrule
 
@@ -16,7 +17,7 @@ router = APIRouter(prefix="/calendar", tags=["calendar"])
 
 def _refs(db, user, data):
     ensure_refs_owned(db, user, {Task: data.get("task_id"), Goal: data.get("goal_id"),
-                                 Habit: data.get("habit_id")})
+                                 Habit: data.get("habit_id"), Project: data.get("project_id")})
 
 
 def _sync_reminders(db, user, ev: CalendarEvent, minutes: list[int]):
@@ -61,14 +62,59 @@ def range_events(db: DB, user: CurrentUser, start: datetime = Query(...), end: d
         dur = ev.ends_at - ev.starts_at
         starts = (occurrences(ev.recurrence_rule, ev.starts_at, ev.timezone, start - dur, end)
                   if ev.recurrence_rule else [ev.starts_at])
+        done_set = set(ev.done_occurrences or [])
         for s in starts:
             if s < end and s + dur > start:
+                done = (_occ_key(s) in done_set) if ev.recurrence_rule else ev.completed_at is not None
                 out.append(EventOccurrence(event_id=ev.id, title=ev.title, starts_at=s, ends_at=s + dur,
                                            all_day=ev.all_day, color=ev.color, category=ev.category,
                                            is_recurring=bool(ev.recurrence_rule), is_time_block=ev.is_time_block,
-                                           task_id=ev.task_id, goal_id=ev.goal_id, habit_id=ev.habit_id))
+                                           task_id=ev.task_id, goal_id=ev.goal_id, habit_id=ev.habit_id,
+                                           project_id=ev.project_id, done=done, external_source=ev.external_source))
     out.sort(key=lambda o: o.starts_at)
     return out
+
+
+def _occ_key(s: datetime) -> str:
+    return s.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+class CompleteIn(BaseModel):
+    done: bool = True
+    occurrence_start: datetime | None = None  # required for recurring events
+
+
+@router.post("/events/{event_id}/complete", response_model=EventRead)
+def complete_event(event_id: uuid.UUID, payload: CompleteIn, db: DB, user: CurrentUser):
+    """Mark an event (or one occurrence of a recurring event) as done. Gives XP once per occurrence;
+    the linked task, if any, is completed too."""
+    from app.services import gamification as gm
+
+    ev = get_owned(db, CalendarEvent, event_id, user)
+    if ev.recurrence_rule:
+        if not payload.occurrence_start or payload.occurrence_start.tzinfo is None:
+            raise HTTPException(422, "Для повторяющегося события укажите occurrence_start с часовым поясом")
+        key = _occ_key(payload.occurrence_start)
+        done = set(ev.done_occurrences or [])
+        (done.add if payload.done else done.discard)(key)
+        ev.done_occurrences = sorted(done)
+    else:
+        key = "single"
+        ev.completed_at = utcnow() if payload.done else None
+    xp_key = f"event_done:{ev.id}:{key}"
+    if payload.done:
+        gm.award(db, user, "event_done", "event", ev.id, key=xp_key)
+        if ev.task_id and not ev.recurrence_rule:
+            from app.api.v1.tasks import _on_status_change
+
+            t = db.get(Task, ev.task_id)
+            if t and t.user_id == user.id and t.status != "done":
+                old, t.status = t.status, "done"
+                _on_status_change(db, user, t, old)
+    else:
+        gm.revoke(db, user, "event_done", "event", ev.id, key=xp_key)
+    db.commit()
+    return EventRead.model_validate(ev)
 
 
 @router.post("/events", response_model=EventRead, status_code=201)

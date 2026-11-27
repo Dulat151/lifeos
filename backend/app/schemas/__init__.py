@@ -164,6 +164,8 @@ class SettingsRead(ORM):
     gamification_enabled: bool
     reading_goal_yearly: int
     categories: dict
+    cosmetics: dict = {}
+    preferences: dict = {}
 
 
 class SettingsUpdate(BaseModel):
@@ -180,6 +182,7 @@ class SettingsUpdate(BaseModel):
     gamification_enabled: bool | None = None
     reading_goal_yearly: Annotated[int, Field(ge=0, le=1000)] | None = None
     categories: dict | None = None
+    preferences: dict | None = None
 
 
 class MeRead(BaseModel):
@@ -204,7 +207,8 @@ class SessionRead(ORM):
 # ================================================================ Goals
 
 GoalCategory = Literal["education", "career", "finance", "health", "fitness", "intelligence",
-                       "personal_development", "social", "creativity", "technology", "languages", "custom"]
+                       "personal_development", "social", "creativity", "technology", "languages", "custom",
+                       "relationships", "projects"]
 
 
 class GoalCreate(BaseModel):
@@ -266,6 +270,7 @@ class GoalDetail(GoalRead):
     events: list[dict] = []
     notes_linked: list[dict] = []
     tasks: list[dict] = []
+    projects: list[dict] = []
     history: list[dict] = []
 
 
@@ -298,6 +303,7 @@ class TaskCreate(RRuleMixin):
     parent_id: uuid.UUID | None = None
     goal_id: uuid.UUID | None = None
     milestone_id: uuid.UUID | None = None
+    project_id: uuid.UUID | None = None
     is_template: bool = False
     tags: list[Annotated[str, Field(min_length=1, max_length=60)]] = []
     checklist: list[ChecklistItemIn] = []
@@ -323,6 +329,7 @@ class TaskRead(Read):
     parent_id: uuid.UUID | None
     goal_id: uuid.UUID | None
     milestone_id: uuid.UUID | None
+    project_id: uuid.UUID | None = None
     is_template: bool
     archived: bool
     completed_at: datetime | None
@@ -455,6 +462,7 @@ class EventCreate(RRuleMixin, TZMixin):
     task_id: uuid.UUID | None = None
     goal_id: uuid.UUID | None = None
     habit_id: uuid.UUID | None = None
+    project_id: uuid.UUID | None = None
     reminder_minutes_before: list[Annotated[int, Field(ge=0, le=40320)]] = []
 
     @field_validator("starts_at", "ends_at")
@@ -483,6 +491,8 @@ class EventRead(Read):
     task_id: uuid.UUID | None
     goal_id: uuid.UUID | None
     habit_id: uuid.UUID | None
+    project_id: uuid.UUID | None = None
+    completed_at: datetime | None = None
     external_source: str | None
 
 
@@ -499,6 +509,9 @@ class EventOccurrence(BaseModel):
     task_id: uuid.UUID | None
     goal_id: uuid.UUID | None
     habit_id: uuid.UUID | None
+    project_id: uuid.UUID | None = None
+    done: bool = False
+    external_source: str | None = None
 
 
 # ================================================================ Reminders / notifications

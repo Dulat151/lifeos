@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.core.time import utcnow
 from app.models import (Achievement, Book, FlashcardReview, FocusSession, Goal, HabitLog, JournalEntry,
-                        LearningSession, Task, Transaction, User, UserAchievement, Workout, XPTransaction)
+                        LearningSession, Project, Task, Transaction, User, UserAchievement, Workout, XPTransaction)
 
 XP_RULES = {
     "task_done": 10,
@@ -26,7 +26,23 @@ XP_RULES = {
     "journal_entry": 5,
     "book_completed": 50,
     "workout": 15,
+    "project_completed": 50,
+    "daily_plan": 10,
+    "event_done": 5,
 }
+
+# Hard tasks give a bonus on top of task_done: urgent priority and long estimates.
+TASK_BONUS = {"priority_1": 10, "long_task": 10}
+LONG_TASK_MINUTES = 120
+
+
+def task_xp(task) -> int:
+    xp = XP_RULES["task_done"]
+    if task.priority == 1:
+        xp += TASK_BONUS["priority_1"]
+    if (task.estimated_minutes or 0) >= LONG_TASK_MINUTES:
+        xp += TASK_BONUS["long_task"]
+    return xp
 
 
 def level_for_xp(xp: int) -> int:
@@ -52,8 +68,9 @@ def _grant_key(db: Session, user_id, base: str) -> str:
 
 
 def award(db: Session, user: User, reason: str, source_type: str, source_id: uuid.UUID | None,
-          key: str | None = None, amount: int | None = None) -> bool:
-    """Idempotent XP award (unique (user_id, idempotency_key)). Returns True if new XP was granted."""
+          key: str | None = None, amount: int | None = None, coins: bool = True) -> bool:
+    """Idempotent XP award (unique (user_id, idempotency_key)). Returns True if new XP was granted.
+    Also grants coins = max(1, XP // 5) under the same key (see services/rewards.py)."""
     if user.settings and not user.settings.gamification_enabled:
         return False
     amt = amount if amount is not None else XP_RULES.get(reason, 0)
@@ -67,6 +84,10 @@ def award(db: Session, user: User, reason: str, source_type: str, source_id: uui
     ).on_conflict_do_nothing(constraint="uq_xp_idem")
     granted = db.execute(stmt.returning(XPTransaction.id)).scalar() is not None
     if granted:
+        if coins:
+            from app.services.rewards import coins_for_xp, grant_coins
+
+            grant_coins(db, user.id, coins_for_xp(amt), reason, f"coins:{idem}")
         check_achievements(db, user)
     return granted
 
@@ -87,6 +108,13 @@ def revoke(db: Session, user: User, reason: str, source_type: str, source_id: uu
         id=uuid.uuid4(), user_id=user.id, amount=-orig.amount, reason="correction", source_type=source_type,
         source_id=source_id, idempotency_key=f"correction:{grant_key}", created_at=utcnow(),
     ).on_conflict_do_nothing(constraint="uq_xp_idem"))
+    from app.models import CoinTransaction
+    from app.services.rewards import grant_coins
+
+    got = db.scalar(select(CoinTransaction.amount).where(CoinTransaction.user_id == user.id,
+                                                         CoinTransaction.idempotency_key == f"coins:{grant_key}"))
+    if got:
+        grant_coins(db, user.id, -got, "correction", f"coins:correction:{grant_key}")
 
 
 def metric_value(db: Session, user_id: uuid.UUID, metric: str) -> int:
@@ -111,7 +139,14 @@ def metric_value(db: Session, user_id: uuid.UUID, metric: str) -> int:
                                                                      Workout.is_rest_day.is_(False)),
         "transactions": select(func.count()).select_from(Transaction).where(Transaction.user_id == user_id),
         "xp": select(func.coalesce(func.sum(XPTransaction.amount), 0)).where(XPTransaction.user_id == user_id),
+        "projects_completed": select(func.count()).select_from(Project).where(
+            Project.user_id == user_id, Project.status == "done", Project.deleted_at.is_(None)),
     }.get(metric)
+    if metric in ("best_streak", "best_week_streak"):
+        from app.services import streaks
+
+        u = db.get(User, user_id)
+        return streaks.best_activity_streak(db, u) if metric == "best_streak" else streaks.best_week_streak(db, u)
     if q is None:
         return 0
     return int(db.scalar(q) or 0)
@@ -133,6 +168,9 @@ def check_achievements(db: Session, user: User) -> list[str]:
             if res is not None:
                 new.append(ach.code)
                 if ach.xp_reward:
+                    from app.services.rewards import coins_for_xp, grant_coins
+
+                    grant_coins(db, user.id, coins_for_xp(ach.xp_reward), "achievement", f"coins:achievement:{ach.code}")
                     db.execute(insert(XPTransaction).values(
                         id=uuid.uuid4(), user_id=user.id, amount=ach.xp_reward, reason="achievement",
                         source_type="achievement", source_id=ach.id,
@@ -161,6 +199,17 @@ ACHIEVEMENTS_SEED = [
      {"metric": "journal_entries", "gte": 7}),
     ("book_1", "Читатель", "Reader", "Прочитайте книгу", "book", 50, {"metric": "books_completed", "gte": 1}),
     ("workout_10", "В форме", "In shape", "10 тренировок", "dumbbell", 60, {"metric": "workouts", "gte": 10}),
+    ("tasks_10", "Разгон", "Warming up", "Выполните 10 задач", "zap", 40, {"metric": "tasks_done", "gte": 10}),
+    ("streak_7", "Неделя без пропусков", "7-day streak", "7 дней развития подряд", "flame", 70,
+     {"metric": "best_streak", "gte": 7}),
+    ("streak_30", "Месяц дисциплины", "30-day streak", "30 дней развития подряд", "medal", 300,
+     {"metric": "best_streak", "gte": 30}),
+    ("weeks_4", "Стабильный ритм", "Steady rhythm", "4 успешные недели подряд (от 4 активных дней)",
+     "calendar-check", 150, {"metric": "best_week_streak", "gte": 4}),
+    ("learn_60", "Первый час знаний", "First study hour", "1 час обучения", "book-open", 30,
+     {"metric": "learning_minutes", "gte": 60}),
+    ("project_1", "Проект завершён", "Project shipped", "Завершите первый проект", "folder-check", 100,
+     {"metric": "projects_completed", "gte": 1}),
 ]
 
 

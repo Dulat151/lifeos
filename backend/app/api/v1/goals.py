@@ -15,7 +15,7 @@ from sqlalchemy import func, select
 
 from app.core.deps import DB, CurrentUser, get_owned
 from app.core.time import utcnow
-from app.models import CalendarEvent, Goal, GoalHistory, Habit, Milestone, Note, Task
+from app.models import CalendarEvent, Goal, GoalHistory, Habit, Milestone, Note, Project, Task
 from app.schemas import (GoalCreate, GoalDetail, GoalRead, GoalUpdate, MilestoneCreate, MilestoneRead,
                          MilestoneUpdate)
 from app.services import gamification as gm
@@ -133,6 +133,8 @@ def get_goal(goal_id: uuid.UUID, db: DB, user: CurrentUser):
                 "due_at": t.due_at.isoformat() if t.due_at else None}
                for t in db.scalars(select(Task).where(Task.user_id == user.id, Task.goal_id == g.id,
                                                       Task.deleted_at.is_(None)).order_by(Task.created_at))]
+    d.projects = [{"id": str(p.id), "title": p.title, "status": p.status, "color": p.color} for p in db.scalars(
+        select(Project).where(Project.user_id == user.id, Project.goal_id == g.id, Project.deleted_at.is_(None)))]
     d.history = [{"field": h.field, "old": h.old_value, "new": h.new_value, "at": h.changed_at.isoformat()}
                  for h in db.scalars(select(GoalHistory).where(GoalHistory.goal_id == g.id)
                                      .order_by(GoalHistory.changed_at.desc()).limit(100))]

@@ -182,3 +182,35 @@ class LifeTimelineEvent(UUIDPk, Timestamps, Owned, Base):
     kind: Mapped[str] = mapped_column(String(20), default="event")  # event|achievement|goal|milestone
     source_type: Mapped[str | None] = mapped_column(String(40))
     source_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+
+
+class CoinTransaction(UUIDPk, Owned, Base):
+    """Virtual coins ledger (no real money). Earned alongside XP and for quests; spent in the rewards shop.
+    Same idempotency scheme as XP: (user_id, idempotency_key) is unique."""
+
+    __tablename__ = "coin_transactions"
+    __table_args__ = (UniqueConstraint("user_id", "idempotency_key", name="uq_coin_idem"),)
+    amount: Mapped[int] = mapped_column(Integer)
+    reason: Mapped[str] = mapped_column(String(60))
+    idempotency_key: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class UserItem(UUIDPk, Owned, Base):
+    """Owned shop item (theme, badge, frame) or consumable (streak_freeze, quantity)."""
+
+    __tablename__ = "user_items"
+    __table_args__ = (UniqueConstraint("user_id", "item_code"),)
+    item_code: Mapped[str] = mapped_column(String(60))
+    quantity: Mapped[int] = mapped_column(Integer, default=1)
+    acquired_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class StreakFreeze(UUIDPk, Owned, Base):
+    """A missed day covered by a streak freeze: counts as active for the daily streak."""
+
+    __tablename__ = "streak_freezes"
+    __table_args__ = (UniqueConstraint("user_id", "day"),)
+    day: Mapped[date] = mapped_column(Date)
+    source: Mapped[str] = mapped_column(String(20), default="item")  # item | weekly_grace
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

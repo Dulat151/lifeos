@@ -10,9 +10,10 @@ from sqlalchemy import func, or_, select
 
 from app.core.deps import DB, CurrentUser
 from app.core.time import local_today, user_tz
-from app.models import (Achievement, Book, CalendarEvent, Course, Goal, Habit, JournalEntry, Note, Task,
+from app.models import (Achievement, Book, CalendarEvent, Course, Goal, Habit, JournalEntry, Note, Project, Task,
                         UserAchievement, XPTransaction)
 from app.services import gamification as gm
+from app.services import rewards
 from app.services.analytics import activity_streak, compute
 
 analytics = APIRouter(prefix="/analytics", tags=["analytics"])
@@ -181,7 +182,42 @@ def get_dashboard(db: DB, user: CurrentUser):
         "weekly": week["series"],
         "quote": {"text": quote[0], "author": quote[1]},
         "recommendations": _recommendations(db, user, ctx),
+        "continue": _continue(db, user),
+        "quests": [q for q in rewards.quests_view(db, user) if q["period"] == "daily"],
+        "coins": rewards.balance(db, user.id),
+        "streak_restore": rewards.restore_status(db, user),
     }
+
+
+def _continue(db, user) -> list[dict]:
+    """"Продолжить развитие": unfinished things the user touched recently, newest first."""
+    from app.api.v1.learning import learning_dashboard
+    from app.api.v1.projects import project_reads
+    from app.models import Project
+
+    items = []
+    for t in db.scalars(select(Task).where(Task.user_id == user.id, Task.deleted_at.is_(None),
+                                           Task.status == "in_progress", Task.is_template.is_(False))
+                        .order_by(Task.updated_at.desc()).limit(3)):
+        items.append({"kind": "task", "id": str(t.id), "title": t.title, "subtitle": "Задача в работе",
+                      "progress": None, "link": "/tasks", "updated_at": t.updated_at.isoformat()})
+    projs = db.scalars(select(Project).where(Project.user_id == user.id, Project.deleted_at.is_(None),
+                                             Project.archived.is_(False), Project.status == "in_progress")
+                       .order_by(Project.updated_at.desc()).limit(3)).all()
+    for p in project_reads(db, user, list(projs)):
+        items.append({"kind": "project", "id": str(p.id), "title": p.title,
+                      "subtitle": f"Проект · {p.tasks_done}/{p.tasks_total} задач", "progress": p.progress,
+                      "link": f"/projects/{p.id}", "updated_at": p.updated_at.isoformat()})
+    for c in learning_dashboard(db, user)["active_courses"][:3]:
+        items.append({"kind": "course", "id": str(c.id), "title": c.title, "subtitle": "Курс",
+                      "progress": getattr(c, "progress", None), "link": f"/courses/{c.id}",
+                      "updated_at": c.updated_at.isoformat()})
+    for n in db.scalars(select(Note).where(Note.user_id == user.id, Note.deleted_at.is_(None),
+                                           Note.archived.is_(False)).order_by(Note.updated_at.desc()).limit(2)):
+        items.append({"kind": "note", "id": str(n.id), "title": n.title, "subtitle": "Заметка",
+                      "progress": None, "link": f"/notes/{n.id}", "updated_at": n.updated_at.isoformat()})
+    items.sort(key=lambda x: x["updated_at"], reverse=True)
+    return items[:6]
 
 
 class LayoutIn(BaseModel):
@@ -227,6 +263,8 @@ def start_day(payload: StartDayIn, db: DB, user: CurrentUser):
     pr[today.isoformat()] = ids
     layout["priorities"] = pr
     user.settings.dashboard_layout = layout
+    if ids:
+        gm.award(db, user, "daily_plan", "day", None, key=f"daily_plan:{today.isoformat()}")
     entry_id = None
     if payload.intention.strip():
         e = JournalEntry(user_id=user.id, kind="morning", title="Начало дня", body=payload.intention,
@@ -271,14 +309,15 @@ def global_search(db: DB, user: CurrentUser, q: str = Query(..., min_length=1, m
     specs = [(Task, "task", Task.title, "/tasks"), (Goal, "goal", Goal.title, "/goals"),
              (Habit, "habit", Habit.title, "/habits"), (Note, "note", Note.title, "/notes"),
              (Book, "book", Book.title, "/books"), (Course, "course", Course.title, "/learning"),
-             (CalendarEvent, "event", CalendarEvent.title, "/calendar")]
+             (CalendarEvent, "event", CalendarEvent.title, "/calendar"),
+             (Project, "project", Project.title, "/projects")]
     for model, typ, col, link in specs:
         stmt = select(model).where(model.user_id == user.id, col.ilike(like))
         if hasattr(model, "deleted_at"):
             stmt = stmt.where(model.deleted_at.is_(None))
         for o in db.scalars(stmt.limit(8)):
             out.append({"type": typ, "id": str(o.id), "title": o.title,
-                        "link": f"{link}/{o.id}" if typ in ("goal", "note") else link})
+                        "link": f"{link}/{o.id}" if typ in ("goal", "note", "project") else link})
     j = db.scalars(select(JournalEntry).where(JournalEntry.user_id == user.id, JournalEntry.deleted_at.is_(None),
                                               or_(JournalEntry.title.ilike(like), JournalEntry.body.ilike(like)))
                    .limit(5))
@@ -296,7 +335,8 @@ def summary(db: DB, user: CurrentUser):
     xp = gm.total_xp(db, user.id)
     lvl = gm.level_for_xp(xp)
     return {"xp": xp, "level": lvl, "level_xp_start": gm.xp_for_level(lvl), "level_xp_next": gm.xp_for_level(lvl + 1),
-            "enabled": user.settings.gamification_enabled, "rules": gm.XP_RULES,
+            "enabled": user.settings.gamification_enabled, "rules": gm.XP_RULES, "task_bonus": gm.TASK_BONUS,
+            "coins": rewards.balance(db, user.id),
             "streak": activity_streak(db, user, local_today(user)),
             "records": {
                 "tasks_done": gm.metric_value(db, user.id, "tasks_done"),
