@@ -55,7 +55,13 @@ export function isoToLocalInput(iso: string | null | undefined) {
 
 export const PRIORITY_LABEL: Record<number, string> = { 1: "Срочно", 2: "Высокий", 3: "Средний", 4: "Низкий" };
 export const STATUS_LABEL: Record<string, string> = { backlog: "Бэклог", todo: "К выполнению", in_progress: "В работе", done: "Готово", cancelled: "Отменено" };
+/** Main life areas first (shown in pickers), then legacy/extra categories. */
 export const GOAL_CATEGORIES: Record<string, string> = {
-  education: "Образование", career: "Карьера", finance: "Финансы", health: "Здоровье", fitness: "Фитнес", intelligence: "Интеллект",
-  personal_development: "Саморазвитие", social: "Социальное", creativity: "Творчество", technology: "Технологии", languages: "Языки", custom: "Другое",
+  health: "Здоровье", education: "Образование", career: "Карьера", finance: "Финансы", personal_development: "Личное развитие",
+  relationships: "Отношения", projects: "Проекты",
+  fitness: "Фитнес", intelligence: "Интеллект", social: "Социальное", creativity: "Творчество", technology: "Технологии", languages: "Языки", custom: "Другое",
+};
+export const GOAL_CATEGORY_COLOR: Record<string, string> = {
+  health: "#34d399", education: "#38bdf8", career: "#8b7cf6", finance: "#fbbf24", personal_development: "#f472b6",
+  relationships: "#fb7185", projects: "#22d3ee", fitness: "#4ade80", languages: "#60a5fa",
 };

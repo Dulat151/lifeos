@@ -1,16 +1,24 @@
 "use client";
 import { DndContext, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
-import { ChevronLeft, ChevronRight, Download, Plus, Repeat, Upload } from "lucide-react";
+import { CalendarDays, Check, ChevronLeft, ChevronRight, CircleCheck, Download, Plus, Repeat, Upload } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
+import { syncSummary } from "@/components/integrations";
 import { Button, Card, Dialog, EmptyState, Field, Input, PageHeader, Select, Switch, Tabs, TabsList, TabsTrigger, Textarea, ConfirmDialog, useToast } from "@/components/ui";
 import { useI18n, useMe } from "@/components/providers";
 import { useGet, useMut } from "@/hooks/use-api";
 import { api, del, download, get, patch, post } from "@/lib/api";
-import type { CalEvent, Goal, Habit, Occurrence, Page, Task } from "@/lib/types";
+import type { CalEvent, Goal, Habit, Occurrence, Page, Project, Task } from "@/lib/types";
 import { cn, fmtTime, isoToLocalInput } from "@/lib/utils";
 
 type View = "day" | "week" | "month" | "year" | "agenda";
+
+/** Category palette: colour-coding shared by the event dialog and the legend. */
+const EVENT_CATEGORIES: { id: string; label: string; color: string }[] = [
+  { id: "work", label: "Работа", color: "#8b7cf6" }, { id: "study", label: "Учёба", color: "#38bdf8" },
+  { id: "health", label: "Здоровье", color: "#34d399" }, { id: "personal", label: "Личное", color: "#f472b6" },
+  { id: "meeting", label: "Встречи", color: "#fbbf24" }, { id: "general", label: "Другое", color: "#94a3b8" },
+];
 
 function startOfDay(d: Date) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
 function addDays(d: Date, n: number) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
@@ -30,15 +38,25 @@ export default function CalendarPage() {
   const params = useSearchParams();
   const router = useRouter();
   const toast = useToast();
+  const me = useMe();
   const [view, setView] = React.useState<View>("week");
+  const viewSet = React.useRef(false);
+  React.useEffect(() => {
+    if (viewSet.current || !me.data) return;
+    viewSet.current = true;
+    const pref = me.data.settings.preferences?.calendar_view;
+    setView(window.innerWidth < 640 ? "agenda" : (pref as View) ?? "week");
+  }, [me.data]);
   const [cursor, setCursor] = React.useState(new Date());
-  const [editing, setEditing] = React.useState<{ ev?: CalEvent; start?: Date } | null>(params.get("new") === "1" ? {} : null);
+  const [editing, setEditing] = React.useState<{ ev?: CalEvent; start?: Date; occ?: Occurrence } | null>(params.get("new") === "1" ? {} : null);
   const [s, e] = range(view, cursor);
   const key = ["calendar", view, s.toISOString()];
   const q = useGet<Occurrence[]>(key, `/calendar/events?start=${encodeURIComponent(s.toISOString())}&end=${encodeURIComponent(e.toISOString())}`);
   const integrations = useGet<{ google: { configured: boolean; connected: boolean; last_sync_at: string | null } }>(["integrations"], "/integrations");
   const moveEv = useMut((v: { id: string; starts_at: string; ends_at: string }) => patch(`/calendar/events/${v.id}`, { starts_at: v.starts_at, ends_at: v.ends_at }), { invalidate: [["calendar"]], success: "Событие перенесено" });
-  const sync = useMut(() => post<{ created: number; updated: number }>("/integrations/google/sync"), { invalidate: [["calendar"], ["integrations"]], onSuccess: (r) => toast(`Google: создано ${r.created}, обновлено ${r.updated}`) });
+  const sync = useMut(() => post<Parameters<typeof syncSummary>[0]>("/integrations/google/sync"), { invalidate: [["calendar"], ["integrations"]], onSuccess: (r) => toast(syncSummary(r)) });
+  const toggleDone = useMut((o: Occurrence) => post(`/calendar/events/${o.event_id}/complete`, { done: !o.done, occurrence_start: o.is_recurring ? o.starts_at : undefined }),
+    { invalidate: [["calendar"], ["tasks"], ["quests"]] });
   const fileRef = React.useRef<HTMLInputElement>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
@@ -52,7 +70,7 @@ export default function CalendarPage() {
     setCursor(d);
   };
   const openEvent = async (o: Occurrence) => {
-    try { setEditing({ ev: await get<CalEvent>(`/calendar/events/${o.event_id}`) }); } catch (err) { toast((err as Error).message, "error"); }
+    try { setEditing({ ev: await get<CalEvent>(`/calendar/events/${o.event_id}`), occ: o }); } catch (err) { toast((err as Error).message, "error"); }
   };
   const onDragEnd = (ev: DragEndEvent) => {
     const occ = q.data?.find((o) => o.event_id + o.starts_at === ev.active.id);
@@ -81,18 +99,18 @@ export default function CalendarPage() {
 
   return (
     <div>
-      <PageHeader title="Календарь" actions={<>
+      <PageHeader icon={<CalendarDays />} title="Календарь" subtitle="События, блоки времени и дедлайны — связаны с задачами, целями и проектами" actions={<>
         <Button variant="outline" size="sm" onClick={() => download("/calendar/export.ics", "lifeos.ics")}><Download />ICS</Button>
         <Button variant="outline" size="sm" onClick={() => fileRef.current?.click()}><Upload />Импорт ICS</Button>
         <input ref={fileRef} type="file" accept=".ics,text/calendar" hidden onChange={(ev) => ev.target.files?.[0] && importIcs(ev.target.files[0])} />
         {integrations.data?.google.connected ? <Button variant="outline" size="sm" onClick={() => sync.mutate()} loading={sync.isPending}>Синхр. Google</Button>
-          : <Button variant="ghost" size="sm" onClick={() => router.push("/settings#integrations")}>Google Calendar</Button>}
+          : <Button variant="ghost" size="sm" onClick={() => router.push("/integrations")}>Подключить Google / iCloud</Button>}
         <Button size="sm" onClick={() => setEditing({ start: new Date() })}><Plus />Событие</Button></>} />
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <Button size="icon" variant="ghost" onClick={() => shift(-1)} aria-label="Назад"><ChevronLeft /></Button>
         <Button size="sm" variant="outline" onClick={() => setCursor(new Date())}>Сегодня</Button>
         <Button size="icon" variant="ghost" onClick={() => shift(1)} aria-label="Вперёд"><ChevronRight /></Button>
-        <span className="text-sm font-medium capitalize">{title}</span>
+        <span className="text-sm font-medium first-letter:uppercase">{title}</span>
         <Tabs value={view} onValueChange={(v) => setView(v as View)} className="ml-auto"><TabsList>
           {(["day", "week", "month", "year", "agenda"] as View[]).map((v) => <TabsTrigger key={v} value={v}>{{ day: "День", week: "Неделя", month: "Месяц", year: "Год", agenda: "Повестка" }[v]}</TabsTrigger>)}
         </TabsList></Tabs>
@@ -105,12 +123,23 @@ export default function CalendarPage() {
       {view === "year" && <YearGrid year={cursor.getFullYear()} occ={occ} onMonth={(m) => { setCursor(new Date(cursor.getFullYear(), m, 1)); setView("month"); }} />}
       {view === "agenda" && (occ.length ? (
         <Card className="divide-y divide-border">{occ.map((o) => (
-          <button key={o.event_id + o.starts_at} onClick={() => openEvent(o)} className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-surface-2">
-            <span className="h-8 w-1 rounded-full" style={{ background: o.color }} />
-            <span className="w-40 text-xs text-muted">{new Date(o.starts_at).toLocaleDateString(locale, { weekday: "short", day: "numeric", month: "short" })} · {o.all_day ? "весь день" : fmtTime(o.starts_at, locale)}</span>
-            <span className="flex-1 text-sm">{o.title}</span>{o.is_recurring && <Repeat className="size-3.5 text-muted" />}
-          </button>))}</Card>) : <EmptyState title="Событий в ближайшие 60 дней нет" />)}
-      {editing && <EventDialog ev={editing.ev} start={editing.start} onClose={() => { setEditing(null); if (params.get("new")) router.replace("/calendar"); }} />}
+          <div key={o.event_id + o.starts_at} className="flex items-center gap-3 px-3 py-2.5 hover:bg-surface-2/60 sm:px-4">
+            <button onClick={() => toggleDone.mutate(o)} aria-label={o.done ? "Снять отметку" : "Отметить выполненным"}
+              className={cn("grid size-5 shrink-0 place-items-center rounded-full border-2 transition-colors", o.done ? "border-success bg-success text-white" : "border-border-strong hover:border-accent")}>
+              {o.done && <Check className="size-3" strokeWidth={3} />}</button>
+            <button onClick={() => openEvent(o)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+              <span className="h-8 w-1 shrink-0 rounded-full" style={{ background: o.color }} />
+              <span className="w-28 shrink-0 text-xs text-muted sm:w-40">{new Date(o.starts_at).toLocaleDateString(locale, { weekday: "short", day: "numeric", month: "short" })} · {o.all_day ? "весь день" : fmtTime(o.starts_at, locale)}</span>
+              <span className={cn("min-w-0 flex-1 truncate text-sm", o.done && "text-muted line-through")}>{o.title}</span>
+              {o.is_recurring && <Repeat className="size-3.5 shrink-0 text-muted" />}
+              {o.external_source && <span className="hidden text-[10px] uppercase text-faint sm:inline">{o.external_source === "caldav" ? "iCloud" : o.external_source}</span>}
+            </button>
+          </div>))}</Card>) : <EmptyState icon={<CalendarDays />} title="Событий в ближайшие 60 дней нет" text="Создайте событие или подключите Google / iCloud календарь" />)}
+      <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-muted">
+        {EVENT_CATEGORIES.map((c) => <span key={c.id} className="flex items-center gap-1.5"><span className="size-2.5 rounded-full" style={{ background: c.color }} />{c.label}</span>)}
+        <span className="flex items-center gap-1.5"><CircleCheck className="size-3.5 text-success" />выполнено — +5 XP</span>
+      </div>
+      {editing && <EventDialog ev={editing.ev} occ={editing.occ} start={editing.start} onClose={() => { setEditing(null); if (params.get("new")) router.replace("/calendar"); }} />}
     </div>
   );
 }
@@ -119,9 +148,10 @@ function EventChip({ o, onOpen, compact }: { o: Occurrence; onOpen: (o: Occurren
   const { attributes, listeners, setNodeRef, transform } = useDraggable({ id: o.event_id + o.starts_at, disabled: o.is_recurring });
   return (
     <div ref={setNodeRef} {...listeners} {...attributes} onClick={(e) => { e.stopPropagation(); onOpen(o); }}
-      style={{ borderLeftColor: o.color, transform: transform ? `translate(${transform.x}px, ${transform.y}px)` : undefined }}
-      className={cn("cursor-pointer truncate rounded border-l-[3px] bg-surface-2 px-1.5 py-0.5 text-xs hover:bg-border", o.is_time_block && "border-dashed", transform && "z-20 shadow-lg")}>
-      {!compact && !o.all_day && <span className="mr-1 text-muted">{fmtTime(o.starts_at)}</span>}{o.title}
+      style={{ borderLeftColor: o.color, background: `color-mix(in srgb, ${o.color} 16%, var(--surface))`, transform: transform ? `translate(${transform.x}px, ${transform.y}px)` : undefined }}
+      className={cn("cursor-pointer truncate rounded-md border-l-[3px] px-1.5 py-0.5 text-xs transition-colors", o.is_time_block && "border-dashed", transform && "z-20 shadow-lg", o.done && "line-through opacity-60")}
+      title={o.title}>
+      {o.done && <Check className="mr-0.5 inline size-3 text-success" />}{!compact && !o.all_day && <span className="mr-1 text-muted">{fmtTime(o.starts_at)}</span>}{o.title}
     </div>
   );
 }
@@ -216,7 +246,7 @@ function YearGrid({ year, occ, onMonth }: { year: number; occ: Occurrence[]; onM
 
 const RECUR = [["", "Не повторять"], ["FREQ=DAILY", "Ежедневно"], ["FREQ=WEEKLY", "Еженедельно"], ["FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR", "По будням"], ["FREQ=MONTHLY", "Ежемесячно"], ["FREQ=YEARLY", "Ежегодно"]];
 
-function EventDialog({ ev, start, onClose }: { ev?: CalEvent; start?: Date; onClose: () => void }) {
+function EventDialog({ ev, occ, start, onClose }: { ev?: CalEvent; occ?: Occurrence; start?: Date; onClose: () => void }) {
   const me = useMe();
   const s0 = ev ? new Date(ev.starts_at) : start ?? new Date();
   if (!ev && !start) s0.setMinutes(0, 0, 0);
@@ -224,13 +254,16 @@ function EventDialog({ ev, start, onClose }: { ev?: CalEvent; start?: Date; onCl
   const [f, setF] = React.useState({
     title: ev?.title ?? "", description: ev?.description ?? "", location: ev?.location ?? "", category: ev?.category ?? "general", color: ev?.color ?? "#6366f1",
     starts_at: isoToLocalInput(s0.toISOString()), ends_at: isoToLocalInput(e0.toISOString()), all_day: ev?.all_day ?? false, recurrence_rule: ev?.recurrence_rule ?? "",
-    is_time_block: ev?.is_time_block ?? false, task_id: ev?.task_id ?? "", goal_id: ev?.goal_id ?? "", habit_id: ev?.habit_id ?? "", reminders: "15",
+    is_time_block: ev?.is_time_block ?? false, task_id: ev?.task_id ?? "", goal_id: ev?.goal_id ?? "", habit_id: ev?.habit_id ?? "", project_id: ev?.project_id ?? "", reminders: "15",
   });
   const [err, setErr] = React.useState("");
   const [confirm, setConfirm] = React.useState(false);
   const goals = useGet<Goal[]>(["goals", "active"], "/goals?status=active");
   const tasks = useGet<Page<Task>>(["tasks", "open-list"], "/tasks?status=todo,in_progress,backlog&limit=200");
   const habits = useGet<Habit[]>(["habits"], "/habits");
+  const projects = useGet<Project[]>(["projects", "list"], "/projects");
+  const done = useMut(() => post(`/calendar/events/${ev!.id}/complete`, { done: !occ?.done, occurrence_start: ev?.recurrence_rule ? occ?.starts_at : undefined }),
+    { invalidate: [["calendar"], ["tasks"], ["quests"]], success: occ?.done ? "Отметка снята" : "Отмечено выполненным", onSuccess: onClose });
   const rem = useGet<number[]>(["calendar", "rem", ev?.id], ev ? `/calendar/events/${ev.id}/reminders` : null);
   React.useEffect(() => { if (rem.data) setF((x) => ({ ...x, reminders: rem.data.join(", ") })); }, [rem.data]);
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setF((x) => ({ ...x, [k]: e.target.value }));
@@ -247,7 +280,7 @@ function EventDialog({ ev, start, onClose }: { ev?: CalEvent; start?: Date; onCl
     save.mutate({ title: f.title.trim(), description: f.description, location: f.location, category: f.category || "general", color: f.color,
       starts_at: s.toISOString(), ends_at: en.toISOString(), all_day: f.all_day, recurrence_rule: f.recurrence_rule || null, is_time_block: f.is_time_block,
       timezone: me.data?.profile.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
-      task_id: f.task_id || null, goal_id: f.goal_id || null, habit_id: f.habit_id || null, reminder_minutes_before: mins });
+      task_id: f.task_id || null, goal_id: f.goal_id || null, habit_id: f.habit_id || null, project_id: f.project_id || null, reminder_minutes_before: mins });
   };
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()} title={ev ? "Событие" : "Новое событие"} wide>
@@ -260,18 +293,26 @@ function EventDialog({ ev, start, onClose }: { ev?: CalEvent; start?: Date; onCl
         <Field label="Повторение"><Select value={f.recurrence_rule} onChange={set("recurrence_rule")}>{RECUR.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           {f.recurrence_rule && !RECUR.some(([v]) => v === f.recurrence_rule) && <option value={f.recurrence_rule}>{f.recurrence_rule}</option>}</Select></Field>
         <Field label="Напоминания, минут до" hint="через запятую, например 15, 60"><Input value={f.reminders} onChange={set("reminders")} /></Field>
-        <Field label="Категория"><Input value={f.category} onChange={set("category")} /></Field>
-        <Field label="Цвет"><Input type="color" className="h-9 w-20 p-1" value={f.color} onChange={set("color")} /></Field>
+        <div className="sm:col-span-2"><div className="mb-1.5 text-xs font-medium text-muted">Категория</div>
+          <div className="flex flex-wrap items-center gap-1.5">{EVENT_CATEGORIES.map((c) => (
+            <button type="button" key={c.id} onClick={() => setF((x) => ({ ...x, category: c.id, color: c.color }))}
+              className={cn("flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors", f.category === c.id ? "border-accent bg-accent-softer" : "border-border hover:border-border-strong")}>
+              <span className="size-2.5 rounded-full" style={{ background: c.color }} />{c.label}</button>))}
+            <input type="color" className="ml-1 h-7 w-9 cursor-pointer rounded-md border border-border bg-transparent p-0.5" value={f.color} onChange={set("color")} aria-label="Свой цвет" /></div></div>
         <Field label="Место" className="sm:col-span-2"><Input value={f.location} onChange={set("location")} /></Field>
         <Field label="Задача"><Select value={f.task_id} onChange={set("task_id")}><option value="">—</option>{tasks.data?.items.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}</Select></Field>
         <Field label="Цель"><Select value={f.goal_id} onChange={set("goal_id")}><option value="">—</option>{goals.data?.map((g) => <option key={g.id} value={g.id}>{g.title}</option>)}</Select></Field>
         <Field label="Привычка"><Select value={f.habit_id} onChange={set("habit_id")}><option value="">—</option>{habits.data?.map((h) => <option key={h.id} value={h.id}>{h.title}</option>)}</Select></Field>
+        <Field label="Проект"><Select value={f.project_id} onChange={set("project_id")}><option value="">—</option>{projects.data?.map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}</Select></Field>
         <Field label="Описание" className="sm:col-span-2"><Textarea value={f.description} onChange={set("description")} /></Field>
         <p className="text-xs text-muted sm:col-span-2">Часовой пояс: {me.data?.profile.timezone}. Повторения рассчитываются с учётом перехода на летнее время.</p>
         {err && <p className="text-sm text-danger sm:col-span-2" role="alert">{err}</p>}
         <div className="flex justify-between sm:col-span-2">
           {ev ? <Button type="button" variant="ghost" onClick={() => setConfirm(true)}>Удалить</Button> : <span />}
-          <Button type="submit" loading={save.isPending}>Сохранить</Button>
+          <div className="flex gap-2">
+            {ev && occ && <Button type="button" variant={occ.done ? "outline" : "soft"} onClick={() => done.mutate()} loading={done.isPending}><CircleCheck />{occ.done ? "Снять отметку" : ev.recurrence_rule ? "Выполнено (это повторение)" : "Выполнено"}</Button>}
+            <Button type="submit" loading={save.isPending}>Сохранить</Button>
+          </div>
         </div>
       </form>
       <ConfirmDialog open={confirm} onOpenChange={setConfirm} title="Удалить событие?" text={ev?.recurrence_rule ? "Будут удалены все повторения." : undefined} onConfirm={() => remove.mutate()} loading={remove.isPending} />

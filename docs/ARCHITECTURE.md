@@ -105,3 +105,23 @@ missing key to 503, per-user rate limit to 429.
 ## Cross-module links
 Goal → milestones → tasks; goal ↔ habits, calendar events, notes, courses, vision board items, shared goals.
 Focus sessions → task actual time and learning sessions. Book/goal/milestone completion → life timeline. Everything → XP, achievements, challenges, analytics, dashboard.
+
+
+## Projects, quests, coins, streaks (2026-11)
+
+- **Projects** (`projects`): status `idea → planned → in_progress → done` (Kanban), progress = done / all
+  non-cancelled tasks with `tasks.project_id`. Notes and events link via `project_id`; goals show their projects.
+  Completing a project gives `project_completed` XP once (undo-safe like every XP award).
+- **XP bonuses:** `task_done` 10 XP, +10 for priority «срочно», +10 for an estimate ≥ 120 min.
+  `daily_plan` +10 when «Сегодняшний фокус» is chosen, `event_done` +5 per event / occurrence.
+- **Coins** (`coin_transactions`): every XP grant also grants `max(1, XP // 5)` coins under the same idempotency
+  key, so undo/redo cannot farm coins. Quests give their own coins. Spent in the shop (`user_items`):
+  themes (accent colour), badges, avatar frames, streak freezes (max 3). No real money, no random rewards.
+- **Quests** (`services/rewards.py`): daily and weekly templates; progress is computed from real data in the
+  user's local day / ISO week; a completed quest is claimed once per period (`quest:{code}:{period}` key).
+  Personal quests = challenges.
+- **Streaks** (`services/streaks.py`, nothing stored except freezes): activity days (task / habit / focus),
+  habit days, productive days (≥3 tasks or ≥60 min focus or ≥30 min learning), successful weeks (≥4 active days).
+  A missed yesterday can be restored once a week for free, otherwise with a freeze item (`streak_freezes`).
+- **Progress** (`/api/v1/progress`, `/progress/weekly-report`): series per day (per ISO week for a year), XP per day,
+  goal progress, streaks; the weekly report compares the last 7 days with the 7 before using rules only.

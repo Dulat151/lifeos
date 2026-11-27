@@ -9,3 +9,4 @@ frontend/.next/
 frontend/test-results/
 frontend/playwright-report/
 *.tsbuildinfo
+frontend/AGENTS.md

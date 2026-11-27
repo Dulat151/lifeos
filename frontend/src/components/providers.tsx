@@ -40,7 +40,21 @@ export function useMe() {
   return useQuery<Me, ApiError>({ queryKey: ["me"], queryFn: () => api<Me>("/users/me"), retry: false, staleTime: 60_000 });
 }
 
-/** Syncs language & theme from the server profile once the user is loaded. */
+/** Accent from a shop theme: sets --accent and a readable foreground colour. null restores the default. */
+export function applyAccent(color: string | null | undefined) {
+  const root = document.documentElement;
+  if (!color) {
+    root.style.removeProperty("--accent");
+    root.style.removeProperty("--accent-fg");
+    return;
+  }
+  root.style.setProperty("--accent", color);
+  const n = parseInt(color.slice(1), 16);
+  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
+  root.style.setProperty("--accent-fg", 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.45 ? "#111318" : "#ffffff");
+}
+
+/** Syncs language, theme and cosmetics from the server profile once the user is loaded. */
 export function UserSync() {
   const { data } = useMe();
   const { setLang, lang } = useI18n();
@@ -48,8 +62,9 @@ export function UserSync() {
     if (!data) return;
     if (data.profile.language !== lang) setLang(data.profile.language);
     applyTheme(data.settings.theme);
+    applyAccent(data.settings.cosmetics?.accent);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data?.profile.language, data?.settings.theme]);
+  }, [data?.profile.language, data?.settings.theme, data?.settings.cosmetics?.accent]);
   return null;
 }
 

@@ -1,5 +1,5 @@
 "use client";
-import { Check, Flame, Pencil, Plus, SkipForward, Trash2 } from "lucide-react";
+import { Check, Flame, Pencil, Plus, Repeat, SkipForward, Trash2 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
 import { BarsChart, Heatmap } from "@/components/charts";
@@ -26,9 +26,11 @@ export default function HabitsPage() {
   const sel = q.data?.find((h) => h.id === selected) ?? active[0];
   return (
     <div>
-      <PageHeader title="Привычки" subtitle="Одна отметка в день; пропуск сохраняет серию" actions={<Button onClick={() => setEditing("new")}><Plus />Привычка</Button>} />
+      <PageHeader icon={<Repeat />} title="Привычки" subtitle="Маленькие ежедневные шаги. Пропуск с отметкой «пропуск» не обнуляет серию" actions={<Button onClick={() => setEditing("new")}><Plus />Привычка</Button>} />
       <QueryState q={q} empty={<EmptyState title="Привычек пока нет" text="Начните с одной маленькой привычки — например, стакан воды утром." action={<Button size="sm" onClick={() => setEditing("new")}><Plus />Создать</Button>} />}>
         {(habits) => (
+          <>
+          {active.length > 0 && <HabitMatrix habits={active} />}
           <div className="grid gap-5 lg:grid-cols-[1fr_1.1fr]">
             <div className="space-y-2">
               {habits.map((h) => {
@@ -58,6 +60,7 @@ export default function HabitsPage() {
             </div>
             {sel && <HabitStatsPanel habit={sel} />}
           </div>
+          </>
         )}
       </QueryState>
       {editing && <HabitDialog habit={editing === "new" ? null : editing} onClose={() => { setEditing(null); if (params.get("new")) router.replace("/habits"); }} />}
@@ -187,3 +190,37 @@ function HabitDialog({ habit, onClose }: { habit: Habit | null; onClose: () => v
   );
 }
 
+
+/** Habits × last 14 days: a quick "calendar of habits". */
+function HabitMatrix({ habits }: { habits: Habit[] }) {
+  const days = Array.from({ length: 14 }, (_, i) => { const d = new Date(); d.setDate(d.getDate() - (13 - i)); return d; });
+  return (
+    <Card className="mb-5 overflow-x-auto p-4">
+      <div className="mb-3 flex items-center justify-between"><h3 className="text-sm font-semibold">Календарь привычек</h3><span className="text-xs text-muted">последние 14 дней</span></div>
+      <table className="w-full min-w-[560px] border-separate border-spacing-[3px] text-xs">
+        <thead><tr><th className="w-40" />{days.map((d) => (
+          <th key={d.toISOString()} className={cn("font-normal text-faint", d.toDateString() === new Date().toDateString() && "font-semibold text-accent")}>
+            <div>{["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"][d.getDay()]}</div><div>{d.getDate()}</div></th>))}</tr></thead>
+        <tbody>{habits.map((h) => <MatrixRow key={h.id} h={h} days={days} />)}</tbody>
+      </table>
+    </Card>
+  );
+}
+
+function MatrixRow({ h, days }: { h: Habit; days: Date[] }) {
+  const heat = useGet<{ date: string; level: number; scheduled: boolean; status: string | null }[]>(["habits", h.id, "heatmap14"], `/habits/${h.id}/heatmap?days=14`);
+  const by = new Map(heat.data?.map((d) => [d.date, d]));
+  return (
+    <tr>
+      <td className="truncate pr-2 text-[13px]"><span className="mr-1.5 inline-block size-2 rounded-full align-middle" style={{ background: h.color }} />{h.title}</td>
+      {days.map((d) => {
+        const k = isoDate(d);
+        const x = by.get(k);
+        const done = x?.status === "done";
+        return <td key={k} title={`${k}: ${done ? "выполнено" : x?.status === "skipped" ? "пропуск" : x?.scheduled ? "не выполнено" : "не запланировано"}`}>
+          <div className={cn("mx-auto size-6 rounded-md", !x?.scheduled && !done && "opacity-30")}
+            style={{ background: done ? h.color : x?.status === "skipped" ? `repeating-linear-gradient(45deg, var(--surface-3), var(--surface-3) 3px, transparent 3px, transparent 6px)` : "var(--surface-2)" }} /></td>;
+      })}
+    </tr>
+  );
+}

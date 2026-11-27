@@ -25,6 +25,9 @@ in the Celery worker. Window: 30 days back, 365 days ahead.
 - When LIFE OS updates an event it rewrites title, time, place, description and recurrence; attendees and
   alarms set in Google / Apple are kept by Google (PATCH) but replaced on CalDAV.
 - Events imported from an `.ics` file are never sent anywhere.
+- **Which Google calendars:** Settings → Интеграции → Google Calendar → «Календари». Pick any calendars of the
+  account (work, family, holidays…) and the calendar where events created in LIFE OS go. Read-only calendars
+  (e.g. holidays) are imported but never written to. Unselecting a calendar removes its copies from LIFE OS only.
 
 ### Google Calendar setup (server admin, once)
 
@@ -68,3 +71,11 @@ Notes land in the folders "Google Keep" / "Apple Notes"; re-importing the same f
 then `GEMINI_API_KEY`. Set `AI_PROVIDER=gemini` (or `anthropic`/`openai`) to force one.
 Gemini keys from Google AI Studio work directly; keys that only work in Vertex AI express mode are retried
 there automatically. `GEMINI_MODEL` defaults to `gemini-flash-latest`.
+
+## Integrations page and adding a service
+
+`/integrations` renders the server-side registry `CATALOG` in `backend/app/api/v1/integrations.py`.
+Statuses: `available` (implemented), `import` (file import), `planned` (shown honestly as not available —
+no connect button). To add a service: add a registry entry, implement its endpoints (OAuth tokens are stored
+encrypted in `connected_accounts`, provider-specific settings in `connected_accounts.meta`), and add its
+card logic on the frontend. Planned today: Google Tasks, Google Drive, Notion, Todoist, Telegram.

@@ -5,7 +5,9 @@ const password = "secret123";
 
 const PAGES = ["/dashboard", "/goals", "/tasks", "/habits", "/calendar", "/reminders", "/learning", "/courses", "/flashcards", "/books",
   "/health", "/fitness", "/finance", "/journal", "/notes", "/focus", "/productivity", "/analytics", "/gamification", "/achievements",
-  "/ai", "/wheel-of-life", "/bucket-list", "/vision-board", "/knowledge-graph", "/timeline", "/challenges", "/social", "/profile", "/settings"];
+  "/ai", "/wheel-of-life", "/bucket-list", "/vision-board", "/knowledge-graph", "/timeline", "/challenges", "/social", "/profile", "/settings",
+  "/projects", "/progress", "/rewards", "/integrations", "/settings?section=notifications", "/settings?section=data", "/rewards?tab=shop",
+  "/rewards?tab=streaks"];
 
 function trackErrors(page: Page) {
   const errors: string[] = [];
@@ -36,6 +38,7 @@ test.describe.serial("LIFE OS main user flows", () => {
     await page.getByLabel("Название *").fill("Выучить английский");
     await page.getByRole("button", { name: "Сохранить" }).click();
     await expect(page.getByRole("heading", { name: "Выучить английский" })).toBeVisible();
+    await page.getByRole("tab", { name: "Этапы и задачи" }).click();
     await page.getByPlaceholder("Новый этап (milestone)…").fill("Уровень A2");
     await page.getByRole("button", { name: "Этап", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Уровень A2" })).toBeVisible();
@@ -99,9 +102,11 @@ test.describe.serial("LIFE OS main user flows", () => {
   });
 
   test("16-17. analytics and XP reflect real actions", async () => {
-    await page.goto("/gamification");
-    await expect(page.getByText(/XP/).first()).toBeVisible();
-    await expect(page.getByText("Задача выполнена").first()).toBeVisible();
+    await page.goto("/gamification"); // redirects to the merged rewards page
+    await expect(page).toHaveURL(/\/rewards/);
+    await page.getByRole("tab", { name: "История" }).click();
+    await expect(page.getByText("История опыта")).toBeVisible();
+    await expect(page.getByText("Задача", { exact: true }).first()).toBeVisible();
     await page.goto("/analytics");
     await expect(page.getByText("Выполнение привычек")).toBeVisible();
   });
@@ -109,6 +114,49 @@ test.describe.serial("LIFE OS main user flows", () => {
   test("18. AI page reports missing provider honestly", async () => {
     await page.goto("/ai");
     await expect(page.getByText("AI-провайдер не подключён на сервере.")).toBeVisible();
+  });
+
+  test("projects: create, link a task, move on the board", async () => {
+    await page.goto("/projects");
+    await page.getByRole("button", { name: "Проект", exact: true }).click();
+    await page.getByLabel("Название").fill("Сайт-портфолио");
+    await page.getByRole("button", { name: "Создать" }).click();
+    await expect(page).toHaveURL(/\/projects\/[0-9a-f-]+/);
+    await page.getByLabel("Новая задача").fill("Купить домен");
+    await page.getByRole("button", { name: "Добавить" }).click();
+    await expect(page.getByText("Купить домен")).toBeVisible();
+    await page.getByRole("button", { name: "Выполнить" }).click();
+    await expect(page.getByText("1 из 1 выполнено")).toBeVisible();
+    await page.getByLabel("Статус").selectOption("done");
+    await page.goto("/projects");
+    await expect(page.getByText("Сайт-портфолио")).toBeVisible();
+  });
+
+  test("notes: template, autosave, checklist toggle, pin", async () => {
+    await page.goto("/notes");
+    await page.getByRole("button", { name: "План на день" }).click();
+    await expect(page).toHaveURL(/\/notes\/[0-9a-f-]+/);
+    await page.getByRole("radio", { name: /Текст/ }).click();
+    await page.getByLabel("Текст заметки").fill("# План\n\n- [ ] Пробежка\n- [ ] Чтение");
+    await expect(page.getByText("Сохранено")).toBeVisible({ timeout: 8000 });
+    await page.getByRole("radio", { name: /Просмотр/ }).click();
+    await page.getByLabel("Пункт чек-листа").first().click(); // re-rendered from Markdown after the click
+    await expect(page.getByText("Чек-лист 1/2")).toBeVisible();
+    await page.getByRole("button", { name: "Закрепить" }).click();
+    await expect(page.getByText("Сохранено")).toBeVisible({ timeout: 8000 });
+    await page.goto("/notes");
+    await expect(page.getByText("Закреплённые")).toBeVisible();
+  });
+
+  test("quests and command menu", async () => {
+    await page.goto("/rewards");
+    await expect(page.getByText("Ежедневные")).toBeVisible();
+    await expect(page.getByText("Выполнить 3 задачи")).toBeVisible();
+    await page.goto("/dashboard");
+    await page.getByRole("button", { name: "Поиск и команды" }).click();
+    await page.getByRole("textbox", { name: "Поиск и команды" }).fill("Сайт");
+    await expect(page.getByRole("option", { name: /Сайт-портфолио/ })).toBeVisible();
+    await page.keyboard.press("Escape");
   });
 
   test("every section renders without runtime errors", async () => {

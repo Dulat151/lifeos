@@ -7,6 +7,13 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   // Same-origin API: the browser talks to /api/* on the frontend host, Next proxies to FastAPI.
   // This keeps auth cookies first-party (httpOnly, SameSite=Lax) and enables the CSRF double-submit cookie.
+  // Old sections merged into /rewards (quests, streaks, shop, achievements, XP history)
+  async redirects() {
+    return [
+      { source: "/gamification", destination: "/rewards?tab=quests", permanent: false },
+      { source: "/achievements", destination: "/rewards?tab=achievements", permanent: false },
+    ];
+  },
   async rewrites() {
     return [{ source: "/api/:path*", destination: `${backend}/api/:path*` }];
   },

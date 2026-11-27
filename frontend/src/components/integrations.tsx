@@ -1,7 +1,7 @@
 "use client";
 import { Apple, CalendarDays, FileUp, RefreshCw } from "lucide-react";
 import * as React from "react";
-import { Badge, Button, Card, CardBody, CardHeader, Field, Input, Select, useToast } from "@/components/ui";
+import { Badge, Button, Card, CardBody, CardHeader, Dialog, Field, Input, Select, useToast } from "@/components/ui";
 import { useI18n } from "@/components/providers";
 import { useGet, useMut } from "@/hooks/use-api";
 import { api, del, get, post } from "@/lib/api";
@@ -9,7 +9,7 @@ import { fmtDateTime } from "@/lib/utils";
 
 type Acc = { connected: boolean; email: string | null; last_sync_at: string | null; last_error: string | null };
 type Integrations = {
-  google: Acc & { configured: boolean };
+  google: Acc & { configured: boolean; calendars: string[]; write_calendar: string | null };
   caldav: Acc & { server_url: string | null; calendar_name: string | null };
   sync_minutes: number;
 };
@@ -67,6 +67,7 @@ export function CalendarIntegrations() {
           <CalendarDays className="size-4 text-muted" />
           <div className="flex-1"><span className="font-medium">Google Calendar</span> <Status acc={d?.google} locale={locale} /></div>
           {d?.google.connected ? <>
+            <GoogleCalendarsPicker count={d.google.calendars.length} />
             <Button size="sm" variant="outline" onClick={() => syncGoogle.mutate()} loading={syncGoogle.isPending}><RefreshCw />Синхронизировать</Button>
             <Button size="sm" variant="ghost" onClick={() => offGoogle.mutate()}>Отключить</Button>
           </> : <Button size="sm" onClick={connectGoogle} disabled={!d?.google.configured}>Подключить</Button>}
@@ -87,6 +88,48 @@ export function CalendarIntegrations() {
       </section>
       {d?.google.connected && d?.caldav.connected && <p className="text-xs text-muted">Новые события из LIFE OS отправляются в Google Calendar; события Google и iCloud синхронизируются каждый со своим календарём.</p>}
     </CardBody></Card>
+  );
+}
+
+type GCal = { id: string; name: string; color: string | null; primary: boolean; writable: boolean };
+
+/** Which Google calendars to sync and where new LIFE OS events are created. */
+function GoogleCalendarsPicker({ count }: { count: number }) {
+  const toast = useToast();
+  const [open, setOpen] = React.useState(false);
+  const q = useGet<{ calendars: GCal[]; selected: string[]; write_calendar: string }>(["integrations", "google-calendars"], open ? "/integrations/google/calendars" : null);
+  const [sel, setSel] = React.useState<string[]>([]);
+  const [write, setWrite] = React.useState("primary");
+  React.useEffect(() => { if (q.data) { setSel(q.data.selected); setWrite(q.data.write_calendar); } }, [q.data]);
+  const save = useMut(() => api<SyncStats & { removed: string[] }>("/integrations/google/calendars", { method: "PUT", body: { selected: sel, write_calendar: write } }),
+    { invalidate: [KEY, ["calendar"]], onSuccess: (r) => { toast(syncSummary(r)); setOpen(false); } });
+  return (
+    <>
+      <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>Календари ({count})</Button>
+      <Dialog open={open} onOpenChange={setOpen} title="Календари Google" description="Отметьте, какие календари показывать в LIFE OS, и куда создавать новые события."
+        footer={<><Button variant="ghost" onClick={() => setOpen(false)}>Отмена</Button><Button onClick={() => save.mutate()} loading={save.isPending} disabled={!sel.length}>Сохранить</Button></>}>
+        {q.isLoading && <p className="text-sm text-muted">Загружаем список календарей из Google…</p>}
+        {q.error && <p className="text-sm text-danger">{q.error.message}</p>}
+        {q.data && (
+          <div className="space-y-4">
+            <ul className="space-y-1">{q.data.calendars.map((c) => (
+              <li key={c.id}><label className="flex cursor-pointer items-center gap-3 rounded-xl px-2 py-2 hover:bg-surface-2">
+                <input type="checkbox" className="size-4 accent-[var(--accent)]" checked={sel.includes(c.id)}
+                  onChange={(e) => setSel(e.target.checked ? [...sel, c.id] : sel.filter((x) => x !== c.id))} />
+                <span className="size-3 rounded-full" style={{ background: c.color ?? "var(--accent)" }} />
+                <span className="flex-1 text-sm">{c.name}{c.primary && <span className="ml-1.5 text-xs text-muted">(основной)</span>}</span>
+                {!c.writable && <Badge>только чтение</Badge>}
+              </label></li>))}</ul>
+            <Field label="Новые события из LIFE OS создавать в">
+              <Select value={write} onChange={(e) => setWrite(e.target.value)}>
+                {q.data.calendars.filter((c) => c.writable && sel.includes(c.id)).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </Select>
+            </Field>
+            <p className="text-xs text-muted">Если снять календарь, его события исчезнут только из LIFE OS — в Google они останутся. Календари «только чтение» (например, праздники) LIFE OS не изменяет.</p>
+          </div>
+        )}
+      </Dialog>
+    </>
   );
 }
 

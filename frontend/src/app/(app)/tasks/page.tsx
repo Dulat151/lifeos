@@ -1,6 +1,6 @@
 "use client";
 import { DndContext, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
-import { Archive, CalendarDays, Check, Copy, KanbanSquare, List, Lock, Plus, Repeat, Trash2 } from "lucide-react";
+import { Archive, CalendarDays, Check, Copy, KanbanSquare, List, ListChecks, Lock, Plus, Repeat, Trash2 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
 import { Badge, Button, Card, EmptyState, Input, PageHeader, QueryState, Select, Tabs, TabsList, TabsTrigger } from "@/components/ui";
@@ -52,7 +52,7 @@ export default function TasksPage() {
 
   return (
     <div>
-      <PageHeader title="Задачи" actions={<>
+      <PageHeader icon={<ListChecks />} title="Задачи" subtitle="Срочные задачи дают бонусный опыт. Задачи связываются с целями и проектами" actions={<>
         <Tabs value={mode} onValueChange={(v) => setMode(v as typeof mode)}><TabsList>
           <TabsTrigger value="list"><List className="mr-1 inline size-4" />Список</TabsTrigger>
           <TabsTrigger value="kanban"><KanbanSquare className="mr-1 inline size-4" />Kanban</TabsTrigger>

@@ -5,7 +5,7 @@ import { FileList } from "@/components/files";
 import { Button, ConfirmDialog, Dialog, Field, Input, Select, Switch, Tabs, TabsContent, TabsList, TabsTrigger, Textarea } from "@/components/ui";
 import { useGet, useMut } from "@/hooks/use-api";
 import { del, patch, post } from "@/lib/api";
-import type { GoalDetail, Goal, Page, Task } from "@/lib/types";
+import type { Goal, GoalDetail, Page, Project, Task } from "@/lib/types";
 import { fmtDateTime, isoToLocalInput, PRIORITY_LABEL, STATUS_LABEL } from "@/lib/utils";
 
 const RECUR = [["", "Не повторять"], ["FREQ=DAILY", "Каждый день"], ["FREQ=WEEKLY", "Каждую неделю"], ["FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR", "По будням"], ["FREQ=MONTHLY", "Каждый месяц"], ["FREQ=YEARLY", "Каждый год"]];
@@ -15,7 +15,7 @@ export function TaskDialog({ task, onClose, defaultTemplate }: { task: Task | nu
   const [f, setF] = React.useState({
     title: task?.title ?? "", description: task?.description ?? "", status: task?.status ?? "todo", priority: String(task?.priority ?? 2),
     due_at: isoToLocalInput(task?.due_at), estimated_minutes: task?.estimated_minutes ? String(task.estimated_minutes) : "",
-    actual_minutes: String(task?.actual_minutes ?? 0), category: task?.category ?? "", goal_id: task?.goal_id ?? "", milestone_id: task?.milestone_id ?? "",
+    actual_minutes: String(task?.actual_minutes ?? 0), category: task?.category ?? "", goal_id: task?.goal_id ?? "", milestone_id: task?.milestone_id ?? "", project_id: task?.project_id ?? "",
     recurrence_rule: task?.recurrence_rule ?? "", tags: (task?.tags ?? []).join(", "), is_template: task?.is_template ?? !!defaultTemplate,
   });
   const [checklist, setChecklist] = React.useState(task?.checklist.map((c) => ({ text: c.text, done: c.done })) ?? []);
@@ -23,6 +23,7 @@ export function TaskDialog({ task, onClose, defaultTemplate }: { task: Task | nu
   const [error, setError] = React.useState("");
   const [confirmDel, setConfirmDel] = React.useState(false);
   const goals = useGet<Goal[]>(["goals", "active"], "/goals?status=active");
+  const projects = useGet<Project[]>(["projects", "list"], "/projects");
   const goal = useGet<GoalDetail>(["goals", f.goal_id], f.goal_id ? `/goals/${f.goal_id}` : null);
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setF((x) => ({ ...x, [k]: e.target.value }));
   const inv = { invalidate: [["tasks"], ["goals"]] };
@@ -38,7 +39,7 @@ export function TaskDialog({ task, onClose, defaultTemplate }: { task: Task | nu
       title: f.title.trim(), description: f.description, status: f.status, priority: Number(f.priority),
       due_at: f.due_at ? new Date(f.due_at).toISOString() : null, estimated_minutes: f.estimated_minutes ? Number(f.estimated_minutes) : null,
       ...(isNew ? {} : { actual_minutes: Number(f.actual_minutes) || 0 }),
-      category: f.category || null, goal_id: f.goal_id || null, milestone_id: f.milestone_id || null, recurrence_rule: f.recurrence_rule || null,
+      category: f.category || null, goal_id: f.goal_id || null, milestone_id: f.milestone_id || null, project_id: f.project_id || null, recurrence_rule: f.recurrence_rule || null,
       tags: f.tags.split(",").map((s) => s.trim()).filter(Boolean), checklist, is_template: f.is_template,
     });
   };
@@ -60,6 +61,7 @@ export function TaskDialog({ task, onClose, defaultTemplate }: { task: Task | nu
             {!isNew && <Field label="Факт, мин" hint="Учитывается автоматически по фокус-сессиям"><Input type="number" min={0} value={f.actual_minutes} onChange={set("actual_minutes")} /></Field>}
             <Field label="Цель"><Select value={f.goal_id} onChange={(e) => setF((x) => ({ ...x, goal_id: e.target.value, milestone_id: "" }))}><option value="">—</option>{goals.data?.map((g) => <option key={g.id} value={g.id}>{g.title}</option>)}</Select></Field>
             <Field label="Этап цели"><Select value={f.milestone_id} onChange={set("milestone_id")} disabled={!f.goal_id}><option value="">—</option>{goal.data?.milestones.map((m) => <option key={m.id} value={m.id}>{m.title}</option>)}</Select></Field>
+            <Field label="Проект"><Select value={f.project_id} onChange={set("project_id")}><option value="">—</option>{projects.data?.map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}</Select></Field>
             <Field label="Категория"><Input value={f.category} onChange={set("category")} placeholder="работа, дом…" /></Field>
             <Field label="Теги"><Input value={f.tags} onChange={set("tags")} placeholder="через запятую" /></Field>
             <Field label="Описание" className="sm:col-span-2"><Textarea value={f.description} onChange={set("description")} /></Field>

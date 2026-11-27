@@ -24,6 +24,8 @@ const ru = {
   "dash.priorities": "Топ-3 приоритета", "dash.habits": "Привычки сегодня", "dash.events": "Ближайшие события", "dash.goals": "Прогресс целей",
   "dash.learning": "Обучение", "dash.focus": "Фокус", "dash.stats": "Статистика", "dash.weekly": "Неделя", "dash.quote": "Цитата дня",
   "dash.ai": "Рекомендации", "dash.customize": "Настроить виджеты", "dash.streak": "Серия", "dash.level": "Уровень",
+  "nav.projects": "Проекты", "nav.progress": "Прогресс", "nav.rewards": "Награды и квесты", "nav.integrations": "Интеграции",
+  "group.progress": "Прогресс", "group.more": "Ещё", "common.create": "Создать", "common.command": "Поиск и команды",
 };
 type Dict = Partial<Record<keyof typeof ru, string>>;
 
@@ -49,6 +51,8 @@ const en: Dict = {
   "dash.priorities": "Top 3 priorities", "dash.habits": "Today's habits", "dash.events": "Upcoming events", "dash.goals": "Goal progress",
   "dash.learning": "Learning", "dash.focus": "Focus", "dash.stats": "Statistics", "dash.weekly": "This week", "dash.quote": "Daily quote",
   "dash.ai": "Recommendations", "dash.customize": "Customize widgets", "dash.streak": "Streak", "dash.level": "Level",
+  "nav.projects": "Projects", "nav.progress": "Progress", "nav.rewards": "Rewards & quests", "nav.integrations": "Integrations",
+  "group.progress": "Progress", "group.more": "More", "common.create": "Create", "common.command": "Search & commands",
 };
 
 const kk: Dict = {
@@ -73,6 +77,8 @@ const kk: Dict = {
   "dash.priorities": "Басты 3 басымдық", "dash.habits": "Бүгінгі әдеттер", "dash.events": "Жақын оқиғалар", "dash.goals": "Мақсаттар барысы",
   "dash.learning": "Оқу", "dash.focus": "Фокус", "dash.stats": "Статистика", "dash.weekly": "Апта", "dash.quote": "Күн дәйексөзі",
   "dash.ai": "Ұсыныстар", "dash.customize": "Виджеттерді баптау", "dash.streak": "Серия", "dash.level": "Деңгей",
+  "nav.projects": "Жобалар", "nav.progress": "Прогресс", "nav.rewards": "Марапаттар мен квесттер", "nav.integrations": "Интеграциялар",
+  "group.progress": "Прогресс", "group.more": "Тағы", "common.create": "Құру", "common.command": "Іздеу және командалар",
 };
 
 const dicts: Record<Lang, Dict> = { ru, en, kk };

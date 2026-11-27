@@ -52,3 +52,22 @@ Verified on 2026-11-22 in a Linux workspace with PostgreSQL 16.15, Redis, Python
 - **Currencies**: per-transaction currency and a main currency; no exchange-rate conversion (other currencies are reported separately).
 - **Health**: tracking only, no medical advice or diagnoses by design.
 - No full accessibility audit or load testing was performed.
+
+
+## Update 2026-11-28: redesign and unified system
+
+Verified locally (Docker, PostgreSQL 16, Chrome): backend 63 tests, frontend 8 unit tests, 15 Playwright e2e
+(main flows + projects, notes from template with checklist, quests, command menu, all 38 routes without runtime
+errors), production build, Render single-container image (API, worker, beat, web).
+
+Done: new design system (dark default, accent recolourable from the shop), new navigation with mobile tab bar,
+⌘K command menu with global search and quick create, dashboard (today focus, day/level/streak rings, quests,
+continue section), projects with Kanban, goals as mission hub, notes with templates / pinning / clickable
+checklists / split view, calendar done-marks and category colours, habit calendar grid, rewards page (quests,
+streaks with restore, shop, achievements, XP history), progress page with weekly report, integrations page with
+honest statuses, sectioned settings with real switches (incl. daily/weekly review reminders).
+
+Not done / limits: Google Tasks, Google Drive, Notion, Todoist, Telegram are listed as planned (not implemented).
+Google Calendar was tested with mocked Google API responses only (needs OAuth credentials to test live).
+New screens are in Russian; Kazakh/English cover navigation and common UI only. Drag-and-drop in the calendar
+moves events by hour slots (no resize). Recurring tasks are not shown as calendar occurrences.

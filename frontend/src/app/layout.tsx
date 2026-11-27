@@ -9,7 +9,7 @@ export const metadata: Metadata = {
   icons: { icon: "/icons/icon-192.png", apple: "/icons/icon-192.png" },
 };
 
-export const viewport: Viewport = { themeColor: "#0d0f12", width: "device-width", initialScale: 1 };
+export const viewport: Viewport = { themeColor: "#0a0b0f", width: "device-width", initialScale: 1 };
 
 // Applies the saved theme before paint to avoid a flash of the wrong theme.
 const themeScript = `try{var t=localStorage.getItem('lifeos_theme')||'dark';var d=t==='dark'||(t==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);if(d)document.documentElement.classList.add('dark')}catch(e){document.documentElement.classList.add('dark')}`;
