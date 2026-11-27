@@ -42,7 +42,8 @@ Verified on 2026-11-22 in a Linux workspace with PostgreSQL 16.15, Redis, Python
 
 ## Known limitations (honest list)
 - **External integrations need your keys**: SMTP, Web Push (VAPID), AI provider, Google OAuth/Calendar. Without keys they show a clear "not configured" state; they were not tested against the real services. Check that `ANTHROPIC_MODEL` matches a model available to your account.
-- **Google Calendar** is a one-way import (read-only scope), not two-way sync. Google *login* (OAuth sign-in) is not implemented; the connection flow links a calendar to an existing account.
+- **Calendars:** two-way sync with Google Calendar and Apple iCloud / any CalDAV server (see `docs/INTEGRATIONS.md`). Verified with tests against in-memory fakes and live against a Radicale CalDAV server (2026-11-28); not yet against real Google / iCloud accounts. Google *login* (OAuth sign-in) is not implemented.
+- **Notes import:** Google Keep (Takeout) and Apple Notes (export script / Markdown). The export script was syntax-checked but not run against a real Notes library.
 - **Offline**: private data is deliberately not cached, so pages need the network to read data; writes made offline are queued and replayed (server wins on conflict). Not covered by automated tests.
 - **Translations**: Kazakh and English cover navigation, common UI, auth and dashboard labels; many inner-page strings are Russian only (they fall back to ru).
 - **Notes editor** is Markdown with live preview (not a WYSIWYG rich-text editor).

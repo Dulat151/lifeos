@@ -2,9 +2,10 @@
 import { Download, LogOut, Monitor, Moon, Sun, Trash2 } from "lucide-react";
 import * as React from "react";
 import { Badge, Button, Card, CardBody, CardHeader, Dialog, Field, Input, PageHeader, Select, Switch, useToast } from "@/components/ui";
+import { CalendarIntegrations, NotesImport } from "@/components/integrations";
 import { applyTheme, useI18n, useInvalidateMe, useMe } from "@/components/providers";
 import { useGet, useMut } from "@/hooks/use-api";
-import { api, del, download, get, patch, post } from "@/lib/api";
+import { api, del, download, patch, post } from "@/lib/api";
 import type { Settings } from "@/lib/types";
 import { cn, fmtDateTime } from "@/lib/utils";
 
@@ -20,8 +21,6 @@ export default function SettingsPage() {
   const upd = useMut((b: Partial<Settings>) => patch("/settings", b), { success: "Настройки сохранены", onSuccess: refresh });
   const sessions = useGet<{ id: string; user_agent: string; ip: string; created_at: string; last_used_at: string | null; current: boolean }[]>(["sessions"], "/auth/sessions");
   const revoke = useMut((id: string) => del(`/auth/sessions/${id}`), { invalidate: [["sessions"]], success: "Сессия завершена" });
-  const integrations = useGet<{ google: { configured: boolean; connected: boolean; last_sync_at: string | null } }>(["integrations"], "/integrations");
-  const disconnect = useMut(() => del("/integrations/google"), { invalidate: [["integrations"]], success: "Google отключён" });
   const channels = useGet<Record<string, boolean | string | null>>(["notifications", "channels"], "/notifications/channels");
   const resend = useMut(() => post<{ sent: boolean; email_configured: boolean }>("/auth/resend-verification"), { onSuccess: (r) => toast(r.sent ? "Письмо отправлено" : r.email_configured ? "Не удалось отправить" : "SMTP на сервере не настроен", r.sent ? "success" : "error") });
   const [pw, setPw] = React.useState({ current_password: "", new_password: "" });
@@ -31,9 +30,6 @@ export default function SettingsPage() {
   React.useEffect(() => { if (s) setQh({ start: s.quiet_hours_start ?? "", end: s.quiet_hours_end ?? "" }); }, [s]);
   if (!s || !me.data) return null;
 
-  const connectGoogle = async () => {
-    try { const r = await get<{ url: string }>("/integrations/google/connect"); location.href = r.url; } catch (e) { toast((e as Error).message, "error"); }
-  };
   const subscribePush = async () => {
     try {
       const key = channels.data?.vapid_public_key as string | null;
@@ -86,15 +82,8 @@ export default function SettingsPage() {
         <p className="text-xs text-muted">Записи дневника приватны по умолчанию и не доступны AI, пока вы не разрешите это выше.</p>
       </CardBody></Card>
 
-      <Card id="integrations"><CardHeader title="Подключённые аккаунты" /><CardBody>
-        <div className="flex flex-wrap items-center gap-3 text-sm">
-          <span className="flex-1">Google Calendar {integrations.data?.google.connected ? <Badge tone="success">подключён</Badge> : <Badge>не подключён</Badge>}
-            {integrations.data?.google.last_sync_at && <span className="ml-2 text-xs text-muted">синхр.: {fmtDateTime(integrations.data.google.last_sync_at, locale)}</span>}</span>
-          {integrations.data?.google.connected ? <Button size="sm" variant="outline" onClick={() => disconnect.mutate()}>Отключить</Button>
-            : <Button size="sm" onClick={connectGoogle} disabled={!integrations.data?.google.configured}>Подключить</Button>}
-        </div>
-        {integrations.data && !integrations.data.google.configured && <p className="mt-2 text-xs text-muted">Для подключения администратор должен задать GOOGLE_CLIENT_ID и GOOGLE_CLIENT_SECRET на сервере.</p>}
-      </CardBody></Card>
+      <CalendarIntegrations />
+      <NotesImport />
 
       <Card><CardHeader title="Безопасность" /><CardBody className="space-y-4">
         {!me.data.email_verified && <div className="flex items-center gap-3 text-sm"><Badge tone="warning">Email не подтверждён</Badge><Button size="sm" variant="outline" onClick={() => resend.mutate()} loading={resend.isPending}>Отправить письмо</Button></div>}

@@ -109,7 +109,7 @@ __all__ = ["User", "Profile", "UserSettings", "AuthSession", "OneTimeToken", "At
 
 
 class ConnectedAccount(UUIDPk, Timestamps, Owned, Base):
-    """External integration (Google Calendar). Tokens are encrypted at rest (Fernet, key derived from SECRET_KEY)."""
+    """External integration (Google Calendar, CalDAV/iCloud). Tokens are encrypted at rest (Fernet, key derived from SECRET_KEY)."""
 
     __tablename__ = "connected_accounts"
     __table_args__ = (UniqueConstraint("user_id", "provider"),)
@@ -120,6 +120,8 @@ class ConnectedAccount(UUIDPk, Timestamps, Owned, Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     scope: Mapped[str] = mapped_column(Text, default="")
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # provider-specific settings, e.g. CalDAV server/calendar URL, last sync error
+    meta: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
 
 
 __all__ += ["ConnectedAccount"]

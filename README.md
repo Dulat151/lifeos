@@ -70,6 +70,7 @@ cd frontend && CHROME_PATH=/usr/bin/google-chrome npx playwright test   # E2E (�
 - [docs/API.md](docs/API.md) — все эндпоинты `/api/v1`
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — структура кода, как добавить модуль
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — развёртывание на сервере, HTTPS, бэкапы
+- [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) — Google Calendar, Apple iCloud, импорт из Google Keep и Apple Notes, AI (Gemini)
 - [docs/SECURITY.md](docs/SECURITY.md) — модель безопасности
 - [docs/TESTING.md](docs/TESTING.md) — тесты и что они покрывают
 - [docs/STATUS.md](docs/STATUS.md) — проверенные критерии приёмки и известные ограничения

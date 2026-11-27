@@ -12,7 +12,7 @@ from app.core.time import utcnow
 from app.models import AIConversation, AIMessage, AIToolAction
 from app.schemas.more import AIActionRead, AIChatIn, AIConversationRead, AIMessageRead
 from app.services.ai import (MODE_PROMPTS, SYSTEM, TOOL_NAMES, AINotConfigured, AIProviderError, Provider,
-                             build_context, get_provider, is_configured)
+                             build_context, get_provider, is_configured, provider_name)
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -23,7 +23,7 @@ def provider_dep() -> Provider:
 
 @router.get("/status")
 def status(user: CurrentUser):
-    return {"enabled": user.settings.ai_enabled, "configured": is_configured(), "provider": settings.ai_provider,
+    return {"enabled": user.settings.ai_enabled, "configured": is_configured(), "provider": provider_name(),
             "context": user.settings.ai_context}
 
 

@@ -1,4 +1,4 @@
-"""LLM integration (server side only). Providers: Anthropic (default) or OpenAI.
+"""LLM integration (server side only). Providers: Anthropic, OpenAI or Google Gemini.
 
 The model never writes to the database. It can only *propose* actions through tools; each proposal is stored
 as ai_tool_actions(status='pending') and executed only after the user confirms it in the UI.
@@ -190,9 +190,82 @@ class OpenAIProvider(Provider):
         return LLMResult(text=msg.get("content") or "", tool_calls=calls)
 
 
+GEMINI_SCHEMA_KEYS = {"type", "properties", "required", "items", "enum", "description", "format", "nullable"}
+
+
+def _gemini_schema(schema: dict) -> dict:
+    """Gemini accepts an OpenAPI subset: drop keywords it rejects (minimum/maximum...)."""
+    out = {k: v for k, v in schema.items() if k in GEMINI_SCHEMA_KEYS}
+    if "properties" in out:
+        out["properties"] = {k: _gemini_schema(v) for k, v in out["properties"].items()}
+    if "items" in out:
+        out["items"] = _gemini_schema(out["items"])
+    return out
+
+
+class GeminiProvider(Provider):
+    """Google Gemini via the Generative Language API; falls back to Vertex AI (express mode) for keys
+    that only work there. The key is sent in a header, never in the URL."""
+
+    ENDPOINTS = ("https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                 "https://aiplatform.googleapis.com/v1/publishers/google/models/{model}:generateContent")
+
+    def complete(self, system, messages):
+        if not settings.gemini_api_key:
+            raise AINotConfigured("GEMINI_API_KEY не задан на сервере")
+        body = {
+            "systemInstruction": {"parts": [{"text": system}]},
+            "contents": [{"role": "model" if m["role"] == "assistant" else "user", "parts": [{"text": m["content"]}]}
+                         for m in messages],
+            "tools": [{"functionDeclarations": [{"name": t["name"], "description": t["description"],
+                                                 "parameters": _gemini_schema(t["input_schema"])} for t in TOOLS]}],
+            "generationConfig": {"maxOutputTokens": 4000},
+        }
+        r = None
+        for url in self.ENDPOINTS:
+            try:
+                r = httpx.post(url.format(model=settings.gemini_model), json=body, timeout=60,
+                               headers={"x-goog-api-key": settings.gemini_api_key})
+            except httpx.HTTPError as e:
+                raise AIProviderError(f"Ошибка провайдера AI: {e}") from e
+            key_rejected = r.status_code in (401, 403, 404) or (r.status_code == 400 and "API_KEY" in r.text)
+            if not key_rejected:
+                break
+        if r.status_code != 200:
+            try:
+                msg = r.json().get("error", {}).get("message", "")
+            except ValueError:
+                msg = r.text[:200]
+            raise AIProviderError(f"Ошибка Gemini ({r.status_code}): {msg}")
+        data = r.json()
+        cands = data.get("candidates") or []
+        if not cands:
+            reason = (data.get("promptFeedback") or {}).get("blockReason", "пустой ответ")
+            raise AIProviderError(f"Gemini не ответил: {reason}")
+        parts = (cands[0].get("content") or {}).get("parts") or []
+        text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
+        calls = [{"name": p["functionCall"]["name"], "arguments": p["functionCall"].get("args") or {}}
+                 for p in parts if "functionCall" in p]
+        return LLMResult(text=text, tool_calls=calls)
+
+
+PROVIDERS = {"anthropic": (AnthropicProvider, "anthropic_api_key"), "openai": (OpenAIProvider, "openai_api_key"),
+             "gemini": (GeminiProvider, "gemini_api_key")}
+
+
+def provider_name() -> str:
+    """Explicit AI_PROVIDER wins; 'auto' picks the first provider whose key is set."""
+    if settings.ai_provider in PROVIDERS:
+        return settings.ai_provider
+    for name, (_, key) in PROVIDERS.items():
+        if getattr(settings, key):
+            return name
+    return "anthropic"
+
+
 def get_provider() -> Provider:
-    return OpenAIProvider() if settings.ai_provider == "openai" else AnthropicProvider()
+    return PROVIDERS[provider_name()][0]()
 
 
 def is_configured() -> bool:
-    return bool(settings.openai_api_key if settings.ai_provider == "openai" else settings.anthropic_api_key)
+    return bool(getattr(settings, PROVIDERS[provider_name()][1]))

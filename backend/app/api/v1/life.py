@@ -5,7 +5,7 @@ from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal
 
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import delete, func, or_, select
 
@@ -403,6 +403,32 @@ def backlinks(note_id: uuid.UUID, db: DB, user: CurrentUser):
         NoteLink.source_id == note_id, Note.deleted_at.is_(None))).all()
     return {"backlinks": [{"id": str(n.id), "title": n.title} for n in rows],
             "links": [{"id": str(n.id), "title": n.title} for n in out_links]}
+
+
+@notes.post("/import")
+async def import_notes(db: DB, user: CurrentUser, files: list[UploadFile] = File(...),
+                       source: str = Form("auto")):
+    """Google Keep (Takeout .zip/.json) and Apple Notes (.md/.html/.txt or .zip of them)."""
+    from app.core.config import settings
+    from app.services import notes_import as ni
+
+    limit = settings.max_upload_mb * 1024 * 1024
+    raw_files = []
+    for f in files[:200]:
+        raw = await f.read(limit + 1)
+        if len(raw) > limit:
+            raise HTTPException(413, f"Файл {f.filename} больше {settings.max_upload_mb} МБ")
+        raw_files.append((f.filename or "note.txt", raw))
+    try:
+        parsed, unsupported = ni.collect(raw_files, source if source in ("auto", "keep", "apple") else "auto")
+    except ni.NotesImportError as e:
+        raise HTTPException(422, str(e)) from None
+    if not parsed:
+        raise HTTPException(422, "В файлах не найдено заметок. Поддерживаются .zip, .json (Google Keep), "
+                                 ".md, .txt, .html")
+    result = ni.save(db, user, parsed, after_save=lambda n: sync_links(db, user, n))
+    db.commit()
+    return {**result, "unsupported_files": unsupported}
 
 
 crud_router(model=Note, create_schema=NoteCreate, update_schema=NoteUpdate, read_schema=NoteRead, tags=["notes"],

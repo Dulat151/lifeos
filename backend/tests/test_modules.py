@@ -1,5 +1,6 @@
 """Learning, flashcards, books, journal, focus, finance, health, notes, analytics, AI, export, deletion, files."""
 from datetime import UTC, date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -239,10 +240,11 @@ def test_files_upload_validation(client):
 
 
 def test_personal_tools(client):
-    w = client.post("/api/v1/wheel-of-life", json={"assessed_on": date.today().isoformat(),
+    today = datetime.now(ZoneInfo("Asia/Almaty")).date()  # the test user's local date
+    w = client.post("/api/v1/wheel-of-life", json={"assessed_on": today.isoformat(),
                                                    "scores": {"health": 8, "career": 6}}).json()
     assert w["average"] == 7.0
-    assert client.post("/api/v1/wheel-of-life", json={"assessed_on": date.today().isoformat(),
+    assert client.post("/api/v1/wheel-of-life", json={"assessed_on": today.isoformat(),
                                                       "scores": {"health": 11}}).status_code == 422
     b = client.post("/api/v1/bucket-list", json={"title": "Увидеть Чарын"}).json()
     client.patch(f"/api/v1/bucket-list/{b['id']}", json={"status": "done"})
@@ -251,8 +253,8 @@ def test_personal_tools(client):
     vb = client.post("/api/v1/vision-boards", json={"title": "2027"}).json()
     assert client.post("/api/v1/vision-items", json={"board_id": vb["id"], "content": "Дом"}).status_code == 201
     c = client.post("/api/v1/challenges", json={"title": "5 задач", "metric": "tasks_done", "target": 1,
-                                                "start_date": date.today().isoformat(),
-                                                "end_date": date.today().isoformat()}).json()
+                                                "start_date": today.isoformat(),
+                                                "end_date": today.isoformat()}).json()
     t = client.post("/api/v1/tasks", json={"title": "x"}).json()
     client.patch(f"/api/v1/tasks/{t['id']}", json={"status": "done"})
     ch = client.get("/api/v1/challenges").json()[0]

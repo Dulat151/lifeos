@@ -25,6 +25,7 @@ export default function NotesPage() {
   return (
     <div>
       <PageHeader title="Заметки" subtitle="Markdown, папки, теги и внутренние ссылки [[Название]]" actions={<>
+        <Button variant="outline" asChild><Link href="/settings#import-notes">Импорт из Keep / Apple</Link></Button>
         <Button variant="outline" asChild><Link href="/knowledge-graph">Граф знаний</Link></Button>
         <Button onClick={() => create.mutate()} loading={create.isPending}><Plus />Заметка</Button></>} />
       <div className="grid gap-4 md:grid-cols-[220px_1fr]">

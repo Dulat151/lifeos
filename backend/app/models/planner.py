@@ -176,8 +176,10 @@ class CalendarEvent(UUIDPk, Timestamps, SoftDelete, Owned, Base):
     task_id: Mapped[uuid.UUID | None] = fk("tasks.id")
     goal_id: Mapped[uuid.UUID | None] = fk("goals.id")
     habit_id: Mapped[uuid.UUID | None] = fk("habits.id")
-    external_source: Mapped[str | None] = mapped_column(String(20))  # ics | google
+    external_source: Mapped[str | None] = mapped_column(String(20))  # ics | google | caldav
     external_uid: Mapped[str | None] = mapped_column(String(255), index=True)
+    # sync bookkeeping: google {"id"}, caldav {"href", "uid", "etag"}
+    external_meta: Mapped[dict | None] = mapped_column(JSON)
 
 
 # ---------------------------------------------------------------- Reminders & notifications
