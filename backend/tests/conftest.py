@@ -3,7 +3,8 @@ import os
 os.environ["ENVIRONMENT"] = "test"
 os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://lifeos:lifeos@localhost:5432/lifeos_test")
 os.environ["SMTP_HOST"] = ""
-os.environ["ANTHROPIC_API_KEY"] = ""
+for _k in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"):  # never hit real AI providers in tests
+    os.environ[_k] = ""
 os.environ["UPLOAD_DIR"] = "/tmp/lifeos-test-uploads"
 
 import pytest  # noqa: E402

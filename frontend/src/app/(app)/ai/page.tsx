@@ -42,7 +42,7 @@ export default function AIPage() {
       {s && !s.enabled && <Card className="mb-4 p-4 text-sm">AI отключён в настройках. <Link href="/settings#ai" className="text-accent">Включить</Link></Card>}
       {s && s.enabled && !s.configured && (
         <Card className="mb-4 border-warning/40 p-4 text-sm">
-          <b>AI-провайдер не подключён на сервере.</b> Администратору нужно задать <code>ANTHROPIC_API_KEY</code> (или <code>AI_PROVIDER=openai</code> и <code>OPENAI_API_KEY</code>) в файле <code>.env</code> backend и перезапустить сервер. Ключи хранятся только на сервере.
+          <b>AI-провайдер не подключён на сервере.</b> Администратору нужно задать <code>GEMINI_API_KEY</code> (или <code>ANTHROPIC_API_KEY</code> / <code>OPENAI_API_KEY</code>) в файле <code>.env</code> на сервере или в Environment на Render и перезапустить сервер. Ключи хранятся только на сервере.
         </Card>
       )}
       <div className="grid gap-4 lg:grid-cols-[240px_1fr]">

@@ -287,6 +287,24 @@ def test_gemini_error_is_reported(monkeypatch):
         ai_mod.get_provider().complete("s", [{"role": "user", "content": "x"}])
 
 
+
+def test_gemini_overload_falls_back_to_stable_model(monkeypatch):
+    monkeypatch.setattr(settings, "ai_provider", "gemini")
+    monkeypatch.setattr(settings, "gemini_api_key", "k")
+    monkeypatch.setattr(settings, "gemini_model", "gemini-flash-latest")
+    urls = []
+
+    def fake_post(url, **kw):
+        urls.append(url)
+        req = httpx.Request("POST", url)
+        if "gemini-flash-latest" in url:
+            return httpx.Response(503, json={"error": {"message": "high demand"}}, request=req)
+        return httpx.Response(200, request=req, json={"candidates": [{"content": {"parts": [{"text": "ok"}]}}]})
+
+    monkeypatch.setattr(ai_mod.httpx, "post", fake_post)
+    assert ai_mod.get_provider().complete("s", [{"role": "user", "content": "x"}]).text == "ok"
+    assert "gemini-2.5-flash" in urls[-1]
+
 # ================================================================ Notes import
 
 def _zip(files: dict) -> bytes:

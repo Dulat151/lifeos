@@ -210,6 +210,21 @@ class GeminiProvider(Provider):
     ENDPOINTS = ("https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
                  "https://aiplatform.googleapis.com/v1/publishers/google/models/{model}:generateContent")
 
+    FALLBACK_MODEL = "gemini-2.5-flash"
+
+    def _post(self, model, body):
+        r = None
+        for url in self.ENDPOINTS:
+            try:
+                r = httpx.post(url.format(model=model), json=body, timeout=60,
+                               headers={"x-goog-api-key": settings.gemini_api_key})
+            except httpx.HTTPError as e:
+                raise AIProviderError(f"Ошибка провайдера AI: {e}") from e
+            key_rejected = r.status_code in (401, 403, 404) or (r.status_code == 400 and "API_KEY" in r.text)
+            if not key_rejected:
+                break
+        return r
+
     def complete(self, system, messages):
         if not settings.gemini_api_key:
             raise AINotConfigured("GEMINI_API_KEY не задан на сервере")
@@ -221,16 +236,10 @@ class GeminiProvider(Provider):
                                                  "parameters": _gemini_schema(t["input_schema"])} for t in TOOLS]}],
             "generationConfig": {"maxOutputTokens": 4000},
         }
-        r = None
-        for url in self.ENDPOINTS:
-            try:
-                r = httpx.post(url.format(model=settings.gemini_model), json=body, timeout=60,
-                               headers={"x-goog-api-key": settings.gemini_api_key})
-            except httpx.HTTPError as e:
-                raise AIProviderError(f"Ошибка провайдера AI: {e}") from e
-            key_rejected = r.status_code in (401, 403, 404) or (r.status_code == 400 and "API_KEY" in r.text)
-            if not key_rejected:
-                break
+        r = self._post(settings.gemini_model, body)
+        # overloaded / rate-limited: retry once on a stable fallback model
+        if r.status_code in (429, 500, 503) and settings.gemini_model != self.FALLBACK_MODEL:
+            r = self._post(self.FALLBACK_MODEL, body)
         if r.status_code != 200:
             try:
                 msg = r.json().get("error", {}).get("message", "")
